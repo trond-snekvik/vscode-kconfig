@@ -1,0 +1,38 @@
+{
+    "folding": {"markers": {"start": "^\\s*(choice|if|menu)", "end": "^\\s*(endchoice|endif|endmenu)"}},
+    "comments": {
+        "lineComment": "#"
+    },
+    "wordPattern": "[a-zA-Z0-9_\\-]+",
+    "surroundingPairs": [
+        [
+            "(",
+            ")"
+        ],
+        [
+            "\"",
+            "\""
+        ]
+    ],
+    "brackets": [
+        [
+            "(",
+            ")"
+        ]
+    ],
+    "autoClosingPairs": [
+        [
+            "(",
+            ")"
+        ],
+        [
+            "\"",
+            "\""
+        ]
+    ],
+    "autoCloseBefore": ";:.,=}])>\n\t",
+    "indentationRules": {
+        "increaseIndentPattern": "^\\s*(config|menuconfig|choice|comment)[\\s:]",
+        "decreaseIndentPattern": "^\\s*(config|menuconfig|choice|endchoice|if|endif|menu|endmenu|source|comment)[\\s:]"
+    }
+}

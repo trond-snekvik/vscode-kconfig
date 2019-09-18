@@ -1,0 +1,152 @@
+{
+    "scopeName": "source.kconfig",
+    "patterns": [
+        {
+            "include": "#comment"
+        },
+        {
+            "begin": "^\\s*(if)\\s+",
+            "end": "(#|$)",
+            "beginCaptures": {"1": {"name": "keyword.control"}},
+            "patterns": [
+                {"include": "#expression"}
+            ]
+        },
+        {
+            "match": "^\\s*(endif|endchoice|endmenu|optional)\\b",
+            "captures": {"1": {"name": "keyword.control"}}
+        },
+        {
+            "begin": "^\\s*(config|menuconfig|choice|imply)\\s+",
+            "end": "(\\s|$|#)",
+            "beginCaptures": {"1": {"name": "keyword.control"}},
+            "patterns": [
+                {"include": "#symbol"}
+            ]
+        },
+        {
+            "begin": "^\\s*(range)\\s+",
+            "end": "(#|$)",
+            "beginCaptures": {
+                "1": {"name": "keyword.control"}
+            },
+            "patterns": [
+                {"include": "#expression"}
+            ]
+        },
+        {
+            "match": "^\\s*(---help---|help)\\b",
+            "captures": {"1": {"name": "keyword.control"}}
+        },
+        {
+            "begin": "\\b(option)\\s+(defconfig_list|modules|allnoconfig_y)=?",
+            "end": "(#|$)",
+            "beginCaptures": {
+                "1": {"name": "keyword.control"},
+                "2": {"name": "support.variable"}
+            },
+            "patterns": [
+                {"include": "#expression"}
+            ]
+        },
+        {
+            "begin": "^\\s*(bool|tristate|string|hex|int)\\s+",
+            "end": "(\\s|$)",
+            "beginCaptures": {"1": {"name": "storage.type"}},
+            "patterns": [
+                {"include": "#string"}
+            ]
+        },
+        {
+            "begin": "^\\s*(visible if|depends on|select|default|def_bool|def_tristate)\\s+",
+            "end": "(#|$)",
+            "beginCaptures": {"1": {"name": "keyword.control"}},
+            "patterns": [
+                {"include": "#expression"}
+            ]
+        },
+        {
+            "begin": "^\\s*(prompt|source|rsource|osource|mainmenu|menu|comment)\\s+",
+            "end": "(#|$)",
+            "beginCaptures": {"1": {"name": "keyword.control"}},
+            "patterns": [
+                {"include": "#string"}
+            ]
+        }
+    ],
+    "repository": {
+        "comment": {
+            "match": "#.*",
+            "name": "comment.line"
+        },
+        "string": {
+            "begin": "\"",
+            "end": "\"",
+            "name": "string.quoted.double"
+        },
+        "symbol": {
+            "match": "[a-zA-Z\\-_0-9]+",
+            "name": "support.variable"
+        },
+        "paren-expression": {
+            "begin": "\\(",
+            "end": "\\)",
+            "beginCaptures": {
+                "0": {
+                    "name": "punctuation.paren.open"
+                }
+            },
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.paren.close"
+                }
+            },
+            "name": "expression.group",
+            "patterns": [
+                {
+                    "include": "#expression"
+                }
+            ]
+        },
+        "expression": {
+            "patterns": [
+                {
+                    "include": "#comment"
+                },
+                {
+                    "include": "#number"
+                },
+                {
+                    "include": "#paren-expression"
+                },
+                {
+                    "include": "#expression-operators"
+                },
+                {
+                    "include": "#symbol"
+                },
+                {
+                    "include": "#line-continuation"
+                }
+            ]
+        },
+        "expression-operators": {
+            "match": "(=|!=|<|>|<=|>=|!|&&|\\|\\|)",
+            "name": "keyword.operator"
+        },
+        "number": {
+            "match": "[+-]?(0x[0-9a-fA-F]+|[0-9]+)",
+            "name": "constant.numeric"
+        },
+        "line-continuation": {
+            "begin": "\\\\$\\n?",
+            "end": "\\n|$",
+            "beginCaptures": {
+                "0": {"name": "constant.character.escape"}
+            },
+            "patterns":[
+                {"include": "#expression"}
+            ]
+        }
+    }
+}

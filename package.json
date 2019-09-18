@@ -1,0 +1,81 @@
+{
+	"name": "kconfig-lang",
+	"displayName": "kconfig-lang",
+	"description": "Syntax highlighting and basic intellisense for kconfig",
+	"version": "0.0.1",
+	"engines": {
+		"vscode": "^1.37.0"
+	},
+	"categories": [
+		"Other"
+	],
+	"activationEvents": [
+		"onLanguage:kconfig",
+		"onLanguage:properties"
+	],
+	"main": "./out/extension.js",
+	"contributes": {
+		"configuration": [
+			{
+				"title": "kconfig",
+				"properties": {
+					"kconfig.root": {
+						"type": "string",
+						"description": "Root kconfig file to start indexing.",
+						"default": "Kconfig"
+					},
+					"kconfig.recursive": {
+						"type": "boolean",
+						"description": "Recursively parse Kconfig files that are included in parsed files",
+						"default": true
+					},
+					"kconfig.env": {
+						"type": "object",
+						"description": "Mapping of environment variables to use in string insertion. Instances of $(VAR) will be replaced by their environment variable VAR's value.",
+						"patternProperties": {
+							".*": {
+								"type": "string"
+							}
+						}
+					}
+				}
+			}
+		],
+		"languages": [
+			{
+				"id": "kconfig",
+				"aliases": [
+					"Kconfig"
+				],
+				"filenamePatterns": [
+					"*kconfig*",
+					"*KConfig*",
+					"*Kconfig*"
+				],
+				"configuration": "./language-configuration.json"
+			}
+		],
+		"grammars": [
+			{
+				"language": "kconfig",
+				"scopeName": "source.kconfig",
+				"path": "./syntaxes/kconfig.tmGrammar.json"
+			}
+		]
+	},
+	"scripts": {
+		"vscode:prepublish": "npm run compile",
+		"compile": "tsc -p ./",
+		"watch": "tsc -watch -p ./",
+		"postinstall": "node ./node_modules/vscode/bin/install",
+		"test": "npm run compile && node ./node_modules/vscode/bin/test"
+	},
+	"devDependencies": {
+		"@types/glob": "^7.1.1",
+		"@types/mocha": "^2.2.42",
+		"@types/node": "^10.12.21",
+		"tslint": "^5.12.1",
+		"typescript": "^3.3.1",
+		"vscode": "^1.1.28"
+	}
+}

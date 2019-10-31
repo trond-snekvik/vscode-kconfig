@@ -11,12 +11,15 @@ function getConfig(name: string): any {
 }
 
 
-class ConfigLocation {
+export type ConfigValue = string | number | boolean;
+
+export class ConfigLocation {
 	locations: vscode.Location[];
 	name: string;
 	help?: string;
 	type?: string;
 	text?: string;
+	override?: ConfigValue;
 	dependencies: string[];
 	selects: string[];
 	defaults: {value: string, condition?: string}[];
@@ -44,6 +47,10 @@ class ConfigLocation {
 			default:
 				return true;
 		}
+	}
+
+	evaluate(): ConfigValue {
+		return true; // TODO
 	}
 }
 
@@ -377,13 +384,12 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 		var text = doc.getText();
 		var lines = text.split(/\r?\n/g);
 		var diags: vscode.Diagnostic[] = [];
-		// var configurations: { entry: ConfigLocation, value: string, line?: number }[] = [];
+		var configurations: { entry: ConfigLocation, value: string, line: number }[] = [];
 		lines.forEach((line, lineNumber) => {
-			var match = line.match(/^\s*CONFIG_([^\s=]+)\s*(?:=\s*([\d\w_-]+))?/);
+			var match = line.match(/^\s*CONFIG_([^\s=]+)\s*(?:=\s*("[^"]*"|[ynm]\b|0x[a-fA-F\d]+\b|\d+\b))?/);
 			if (match) {
 				var thisLine = new vscode.Position(lineNumber, 0);
 				if (match[2]) {
-
 					var entry = this.getEntry(match[1]);
 					if (entry) {
 						if (entry.type && ['int', 'hex'].includes(entry.type) && entry.range) {
@@ -405,17 +411,17 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 								}
 								break;
 							case 'hex':
-								if (!match[2].match(/^0x[a-fA-F\d]+$/)) {
+								if (!match[2].match(/^0x[a-fA-F\d]+/)) {
 									diags.push(new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), `Entry ${match[1]} is a hex, should be on the form '0x1bad234'`, vscode.DiagnosticSeverity.Error));
 								}
 								break;
 							case 'int':
-								if (!match[2].match(/^\d+$/)) {
+								if (!match[2].match(/^\d+/)) {
 									diags.push(new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), `Entry ${match[1]} is an int, should be on the form '1234'`, vscode.DiagnosticSeverity.Error));
 								}
 								break;
 							case 'string':
-								if (!match[2].match(/^".*"$/)) {
+								if (!match[2].match(/^"[^"]*"/)) {
 									diags.push(new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), `Entry ${match[1]} is a string, should be on the form "text"`, vscode.DiagnosticSeverity.Error));
 								}
 								break;
@@ -423,10 +429,28 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 								diags.push(new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), `Entry ${match[1]} is of unknown type`, vscode.DiagnosticSeverity.Warning));
 								break;
 						}
-						// configurations.push({ entry: entry, value: match[2], line: lineNumber });
-						// configurations = configurations.concat(this.getSelections(entry).map(e => { return { entry: e, value: 'y'}; }));
+						if (
+							(entry.defaults.length === 0 && entry.type && ['bool', 'tristate'].includes(entry.type) && match[2] === 'n') ||
+							(entry.defaults.length === 1 && !entry.defaults[0].condition && entry.defaults[0].value === match[2])) {
+							diags.push(new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), `Entry ${match[1]} is redundant (same as default)`, vscode.DiagnosticSeverity.Hint));
+						}
+
+						var duplicate = configurations.find(c => c.entry === entry);
+						if (duplicate) {
+							var diag = new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), `Entry ${match[1]} is already defined`, vscode.DiagnosticSeverity.Warning);
+							diag.relatedInformation = [{ location: new vscode.Location(doc.uri, new vscode.Position(duplicate.line, 0)), message: 'Previous declaration here' }];
+							diags.push(diag);
+						} else {
+							configurations.push({ entry: entry, value: match[2], line: lineNumber });
+						}
 					} else {
 						diags.push(new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), 'Unknown entry ' + match[1], vscode.DiagnosticSeverity.Error));
+					}
+
+					var trailing = line.slice(match[0].length).match(/^\s*([^#\s]+[^#]*)/);
+					if (trailing) {
+						var start = match[0].length + trailing[0].indexOf(trailing[1]);
+						diags.push(new vscode.Diagnostic(new vscode.Range(thisLine.line, start, thisLine.line, start + trailing[1].trimRight().length), 'Unexpected trailing characters', vscode.DiagnosticSeverity.Error));
 					}
 				} else {
 					diags.push(new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), 'Missing value for config ' + match[1], vscode.DiagnosticSeverity.Error));
@@ -455,7 +479,6 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 		var all = this.getAll();
 		return all.filter(e => e.selects.includes(entry.name));
 	}
-
 	// getSelectorsRecursive(entry: ConfigLocation, configItems: {entry: ConfigLocation, value: string, line?: number}[]): ConfigLocation[] {
 	// 	var all = this.getAll();
 	// 	var selectors: ConfigLocation[] = [];

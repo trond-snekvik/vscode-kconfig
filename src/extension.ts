@@ -100,7 +100,7 @@ function envReplace(text: string, env: Environment) {
 	return text.replace(/\$\(([^)]+)(?:(,[^)]+))?\)/, (original, variable, dflt) => ((variable in env) ? env[variable] : dflt ? dflt : original));
 }
 
-class KconfigDefinitionProvider implements vscode.DefinitionProvider, vscode.HoverProvider, vscode.CompletionItemProvider, vscode.DocumentLinkProvider, vscode.ReferenceProvider {
+class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvider, vscode.CompletionItemProvider, vscode.DocumentLinkProvider, vscode.ReferenceProvider {
 
 	files: { [fileName: string]: LocationFile };
 	entries: { [name: string]: ConfigLocation };
@@ -187,6 +187,11 @@ class KconfigDefinitionProvider implements vscode.DefinitionProvider, vscode.Hov
 		if (root) {
 			this.scanFile(root, false);
 		}
+
+		vscode.window.visibleTextEditors
+			.filter(e => e.document.languageId === 'properties')
+			.forEach(e => this.servePropertiesDiag(e.document));
+
 		hrTime = process.hrtime();
 		var end = (hrTime[0] * 1000 + hrTime[1] / 1000000);
 		return Promise.resolve(`${this.getAll().length} entries, ${((end - start) / 1000).toFixed(2)} s`);
@@ -646,7 +651,7 @@ class KconfigDefinitionProvider implements vscode.DefinitionProvider, vscode.Hov
 // your extension is activated the very first time the command is executed
 export async function activate(context: vscode.ExtensionContext) {
 
-	var definitionProvider = new KconfigDefinitionProvider();
+	var langHandler = new KconfigLangHandler();
 
 	var status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 10000);
 	context.subscriptions.push(status);
@@ -658,7 +663,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	}
 	status.show();
 	setTimeout(() => {
-		definitionProvider.doScan().then(result => {
+		langHandler.doScan().then(result => {
 			status.text = `$(verified) kconfig complete (${result})`;
 		}).catch(e => {
 			status.text = `$(alert) kconfig failed`;
@@ -674,15 +679,15 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	var selector = [{ language: 'kconfig', scheme: 'file' }, { language: 'properties', scheme: 'file' }];
 
-	let disposable = vscode.languages.registerDefinitionProvider(selector, definitionProvider);
+	let disposable = vscode.languages.registerDefinitionProvider(selector, langHandler);
 	context.subscriptions.push(disposable);
-	disposable = vscode.languages.registerHoverProvider(selector, definitionProvider);
+	disposable = vscode.languages.registerHoverProvider(selector, langHandler);
 	context.subscriptions.push(disposable);
-	disposable = vscode.languages.registerCompletionItemProvider(selector, definitionProvider);
+	disposable = vscode.languages.registerCompletionItemProvider(selector, langHandler);
 	context.subscriptions.push(disposable);
-	disposable = vscode.languages.registerDocumentLinkProvider({ language: 'kconfig', scheme: 'file' }, definitionProvider);
+	disposable = vscode.languages.registerDocumentLinkProvider({ language: 'kconfig', scheme: 'file' }, langHandler);
 	context.subscriptions.push(disposable);
-	disposable = vscode.languages.registerReferenceProvider({ language: 'kconfig', scheme: 'file' }, definitionProvider);
+	disposable = vscode.languages.registerReferenceProvider({ language: 'kconfig', scheme: 'file' }, langHandler);
 	context.subscriptions.push(disposable);
 }
 

@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as glob from "glob";
-import { resolveExpression } from './evaluate';
+import { resolveExpression, tokenizeExpression, TokenKind } from './evaluate';
 
 function getConfig(name: string): any {
 	var config = vscode.workspace.getConfiguration("kconfig");
@@ -140,9 +140,13 @@ export class ConfigLocation {
 		return symbol.evaluate(all, overrides);
 	}
 
+	missingDependency(all: ConfigLocation[], overrides: ConfigOverride[] = []): string | undefined {
+		return this.dependencies.find(d => !resolveExpression(d, all, overrides));
+	}
+
 	evaluate(all: ConfigLocation[], overrides: ConfigOverride[] = []): ConfigValue {
 		// All dependencies must be true
-		if (!this.dependencies.every(d => resolveExpression(d, all, overrides) === true)) {
+		if (this.missingDependency(all, overrides)) {
 			return false;
 		}
 
@@ -232,13 +236,13 @@ function envReplace(text: string, env: Environment) {
 	return text.replace(/\$\(([^)]+)(?:(,[^)]+))?\)/, (original, variable, dflt) => ((variable in env) ? env[variable] : dflt ? dflt : original));
 }
 
-class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvider, vscode.CompletionItemProvider, vscode.DocumentLinkProvider, vscode.ReferenceProvider {
+class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvider, vscode.CompletionItemProvider, vscode.DocumentLinkProvider, vscode.ReferenceProvider, vscode.CodeActionProvider {
 
 	files: { [fileName: string]: LocationFile };
 	entries: { [name: string]: ConfigLocation };
 	staticConf: ConfigOverride[];
 	diags: vscode.DiagnosticCollection;
-
+	actions: { [uri: string]: vscode.CodeAction[] };
 	operatorCompletions: vscode.CompletionItem[];
 
 	constructor() {
@@ -264,6 +268,7 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 		dependsOn.insertText = new vscode.SnippetString('depends on ');
 		dependsOn.insertText.appendTabstop();
 		this.operatorCompletions.push(dependsOn);
+		this.actions = {};
 		var visibleIf = new vscode.CompletionItem('visible if', vscode.CompletionItemKind.Keyword);
 		visibleIf.insertText = new vscode.SnippetString('visible if ');
 		visibleIf.insertText.appendTabstop();
@@ -658,15 +663,18 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 		});
 
 		var all = this.getAll();
+		var actions: vscode.CodeAction[] = [];
 
 		// Post processing, now that all values are known:
 		configurations.forEach(c => {
-			var override = c.config.resolveValueString(c.value);
 			if (c.line === undefined) {
 				return;
 			}
 
+			var override = c.config.resolveValueString(c.value);
 			var line = new vscode.Range(c.line, 0, c.line, 99999999);
+			var diag: vscode.Diagnostic;
+			var action: vscode.CodeAction;
 
 			if (c.config.type && ['int', 'hex'].includes(c.config.type)) {
 
@@ -677,20 +685,95 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 						vscode.DiagnosticSeverity.Error));
 				}
 			}
-			if (override === c.config.defaultValue(all, configurations)) {
-				diags.push(new vscode.Diagnostic(line,
+
+			// tslint:disable-next-line: triple-equals
+			if (override == c.config.defaultValue(all, configurations)) {
+				diag = new vscode.Diagnostic(line,
 					`Entry ${c.config.name} is redundant (same as default)`,
-					vscode.DiagnosticSeverity.Hint));
+					vscode.DiagnosticSeverity.Hint);
+				diag.tags = [vscode.DiagnosticTag.Unnecessary];
+				diags.push(diag);
+
+				action = new vscode.CodeAction(`Remove redundant entry CONFIG_${c.config.name}`, vscode.CodeActionKind.Refactor);
+				action.edit = new vscode.WorkspaceEdit();
+				action.edit.delete(doc.uri, new vscode.Range(c.line, 0, c.line + 1, 0));
+				action.diagnostics = [diag];
+				action.isPreferred = true;
+				actions.push(action);
 			}
 
-			var actualValue = c.config.evaluate(all, configurations);
-			// tslint:disable-next-line: triple-equals (want to ignore false != undefined)
-			if (override != actualValue) {
-				if (!actualValue) {
-					diags.push(new vscode.Diagnostic(line,
-						`Entry ${c.config.name} isn't used.`,
-						vscode.DiagnosticSeverity.Warning));
+			var missingDependency = c.config.missingDependency(all, configurations);
+			if (missingDependency) {
+				if (c.value === 'n') {
+					diag = new vscode.Diagnostic(line,
+						`Entry is already disabled by dependency: ${missingDependency}`,
+						vscode.DiagnosticSeverity.Warning);
+					diag.tags = [vscode.DiagnosticTag.Unnecessary];
+
+					action = new vscode.CodeAction(`Remove redundant entry CONFIG_${c.config.name}`, vscode.CodeActionKind.Refactor);
+					action.edit = new vscode.WorkspaceEdit();
+					action.edit.delete(doc.uri, new vscode.Range(c.line, 0, c.line + 1, 0));
+					action.diagnostics = [diag];
+					action.isPreferred = true;
+					actions.push(action);
 				} else {
+					diag = new vscode.Diagnostic(line,
+						`Entry ${c.config.name} dependency ${missingDependency} missing.`,
+						vscode.DiagnosticSeverity.Warning);
+				}
+
+				var tokens = tokenizeExpression(missingDependency);
+				var variables = tokens
+					.filter(t => t.kind === TokenKind.VAR)
+					.map(t => this.getEntry(t.value))
+					.filter(e => (e && e.type && ['bool', 'tristate'].includes(e.type)));
+
+				/* Unless the expression is too complex, try all combinations to find one that works: */
+				if (variables.length > 0 && variables.length < 4) {
+					for (var code = 0; code < (1 << variables.length); code++) {
+						var overrides: ConfigOverride[] = variables.map((v, i) => { return { config: v!, value: (code & (1 << i)) ? 'y' : 'n' }; });
+						if (resolveExpression(missingDependency, all, overrides.concat(configurations))) {
+							var newEntries: ConfigOverride[] = [];
+							var existingEntries: ConfigOverride[] = [];
+							overrides.forEach(o => {
+								var dup = configurations.find(c => o.config.name === c.config.name);
+								if (dup && dup.line !== undefined) {
+									if (dup.value !== o.value) {
+										existingEntries.push({config: dup.config, value: o.value, line: dup.line});
+									}
+								} else {
+									newEntries.push(o);
+								}
+							});
+							if (newEntries.length === 0 && existingEntries.length === 0) {
+								continue;
+							}
+
+							action = new vscode.CodeAction('Add missing dependencies', vscode.CodeActionKind.Refactor);
+							action.edit = new vscode.WorkspaceEdit();
+							if (newEntries.length) {
+								action.edit.insert(doc.uri,
+									new vscode.Position(c.line, 0),
+									newEntries.map(c => `CONFIG_${c.config.name}=${c.value}\n`).join(''));
+							}
+							if (existingEntries.length) {
+								existingEntries.forEach(e => {
+									action.edit!.replace(doc.uri,
+										new vscode.Range(e.line!, 0, e.line!, 999999),
+										`CONFIG_${e.config.name}=${e.value}`);
+								});
+							}
+							action.isPreferred = true;
+							action.diagnostics = [diag];
+							actions.push(action);
+							break;
+						}
+					}
+				}
+				diags.push(diag);
+			} else {
+				var actualValue = c.config.evaluate(all, configurations);
+				if (override !== actualValue) {
 					diags.push(new vscode.Diagnostic(line,
 						`Entry ${c.config.name} assigned value ${c.value}, but evaluated to ${c.config.toValueString(actualValue)}`,
 						vscode.DiagnosticSeverity.Warning));
@@ -699,6 +782,7 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 		});
 
 		this.diags.set(doc.uri, diags);
+		this.actions[doc.uri.fsPath] = actions;
 	}
 
 	deleteEntry(entry: ConfigLocation) {
@@ -868,6 +952,15 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 		return []; // TODO
 	}
 
+	provideCodeActions(document: vscode.TextDocument,
+		range: vscode.Range | vscode.Selection,
+		context: vscode.CodeActionContext,
+		token: vscode.CancellationToken): vscode.ProviderResult<(vscode.Command | vscode.CodeAction)[]> {
+		if (document.uri.fsPath in this.actions) {
+			return this.actions[document.uri.fsPath].filter(a => a.diagnostics![0].range.intersection(range));
+		}
+	}
+
 }
 
 // this method is called when your extension is activated
@@ -909,6 +1002,8 @@ export async function activate(context: vscode.ExtensionContext) {
 	disposable = vscode.languages.registerCompletionItemProvider(selector, langHandler);
 	context.subscriptions.push(disposable);
 	disposable = vscode.languages.registerDocumentLinkProvider({ language: 'kconfig', scheme: 'file' }, langHandler);
+	context.subscriptions.push(disposable);
+	disposable = vscode.languages.registerCodeActionsProvider({ language: 'properties', scheme: 'file' }, langHandler);
 	context.subscriptions.push(disposable);
 	// disposable = vscode.languages.registerReferenceProvider({ language: 'kconfig', scheme: 'file' }, langHandler);
 	// context.subscriptions.push(disposable);

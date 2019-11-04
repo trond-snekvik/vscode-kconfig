@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as glob from "glob";
+import { resolveExpression } from './evaluate';
 
 function getConfig(name: string): any {
 	var config = vscode.workspace.getConfiguration("kconfig");
@@ -12,33 +13,65 @@ function getConfig(name: string): any {
 
 
 export type ConfigValue = string | number | boolean;
+export type ConfigValueRange = { max: string, min: string, condition?: string };
+export type ConfigValueType = 'string' | 'int' | 'hex' | 'bool' | 'tristate';
+export type ConfigOverride = { config: ConfigLocation, value: string, line?: number };
+export type ConfigKind = 'config' | 'menuconfig' | 'choice';
 
 export class ConfigLocation {
 	locations: vscode.Location[];
 	name: string;
 	help?: string;
-	type?: string;
+	type?: ConfigValueType;
 	text?: string;
-	override?: ConfigValue;
 	dependencies: string[];
-	selects: string[];
-	defaults: {value: string, condition?: string}[];
-	range?: { max: string, min: string };
-	kind?: 'config' | 'menuconfig' | 'choice';
-	constructor(name: string, location: vscode.Location, kind: string) {
+	choices?: { name: string };
+	selects: { name: string, condition?: string }[];
+	defaults: { value: string, condition?: string }[];
+	ranges: ConfigValueRange[];
+	kind?: ConfigKind;
+	constructor(name: string, location: vscode.Location, kind?: ConfigKind, type?: ConfigValueType) {
 		this.name = name;
 		this.locations = [location];
-		if (['config', 'menuconfig', 'choice'].includes(kind)) {
-			this.kind = kind as 'config' | 'menuconfig' | 'choice';
-		}
+		this.kind = kind;
 		this.defaults = [];
 		this.dependencies = [];
 		this.selects = [];
+		this.ranges = [];
+		this.type = type;
+	}
+
+	isValidOverride(overrideValue: string): boolean {
+
+		switch (this.type) {
+			case 'bool':
+				return ['y', 'n'].includes(overrideValue);
+			case 'tristate':
+				return ['y', 'n', 'm'].includes(overrideValue);
+			case 'hex':
+				return !!overrideValue.match(/^0x[a-fA-F\d]+/);
+			case 'int':
+				return !!overrideValue.match(/^\d+/);
+			case 'string':
+				return !!overrideValue.match(/^"[^"]*"/);
+			default:
+				return false;
+		}
+	}
+
+	defaultValue(all: ConfigLocation[], overrides: ConfigOverride[] = []): ConfigValue {
+		var dflt = this.defaults.find(d => d.condition === undefined || resolveExpression(d.condition, all, overrides) === true);
+		if (dflt) {
+			return resolveExpression(dflt.value, all, overrides);
+		}
+
+		return false;
 	}
 
 	isEnabled(value?: string) {
 		switch (this.type) {
 			case 'bool':
+			case 'tristate':
 				return (value === undefined) ? this.defaults.some(d => d.value === 'y') : (value === 'y');
 			case 'int':
 				return (value === undefined) ? this.defaults.some(d => d.value !== '0') : (value !== '0');
@@ -49,8 +82,100 @@ export class ConfigLocation {
 		}
 	}
 
-	evaluate(): ConfigValue {
-		return true; // TODO
+	resolveValueString(value: string): ConfigValue {
+		switch (this.type) {
+			case 'bool':
+			case 'tristate':
+				return value === 'y' || value === 'm';
+			case 'int':
+			case 'hex':
+				return Number(value);
+			case 'string':
+				return value;
+			default:
+				return false;
+		}
+	}
+
+	toValueString(value: ConfigValue): string {
+		switch (this.type) {
+			case 'bool':
+			case 'tristate':
+				return value ? 'y' : 'n';
+			case 'int':
+				return value.toString(10);
+			case 'hex':
+				return '0x' + value.toString(16);
+			case 'string':
+				return `"${value}"`;
+			default:
+				return 'n';
+		}
+	}
+
+	getRange(all: ConfigLocation[], overrides: ConfigOverride[] = []): {min: number, max: number} {
+
+		var range = this.ranges.find(r => !r.condition || resolveExpression(r.condition, all, overrides));
+		if (range) {
+			return {
+				min: this.evaluateSymbol(range.min, all, overrides) as number,
+				max: this.evaluateSymbol(range.max, all, overrides) as number,
+			};
+		}
+		return { min: Number.MIN_SAFE_INTEGER, max: Number.MAX_SAFE_INTEGER };
+
+	}
+
+	evaluateSymbol(name: string, all: ConfigLocation[], overrides: ConfigOverride[] = []): ConfigValue {
+		if (name.match(/^\s*(0x[\da-fA-F]+|\d+)\s*$/)) {
+			return Number(name);
+		} else if (name.match(/^\s*[ynm]\s*$/)) {
+			return name.trim() !== 'n';
+		}
+
+		var symbol = all.find(c => c.name === name);
+		if (!symbol) {
+			return false;
+		}
+		return symbol.evaluate(all, overrides);
+	}
+
+	evaluate(all: ConfigLocation[], overrides: ConfigOverride[] = []): ConfigValue {
+		// All dependencies must be true
+		if (!this.dependencies.every(d => resolveExpression(d, all, overrides) === true)) {
+			return false;
+		}
+
+		var override = overrides.find(o => o.config.name === this.name);
+		if (override) {
+			return this.resolveValueString(override.value);
+		}
+
+		if (this.type === 'bool' || this.type === 'tristate') {
+			var selectorFilter = (s: { name: string, condition?: string }) => {
+				return s.name === this.name && (s.condition === undefined || resolveExpression(s.condition, all, overrides));
+			};
+
+			var select = overrides.find(
+				o => (
+					(o.config.type === 'bool' || o.config.type === 'tristate') &&
+					o.config.isEnabled(o.value) &&
+					o.config.selects.find(selectorFilter)
+				)
+			) || all.find(
+				c => (
+					(c.type === 'bool' || c.type === 'tristate') &&
+					c.selects.find(selectorFilter) &&
+					c.evaluate(all, overrides)
+				)
+			);
+
+			if (select) {
+				return true;
+			}
+		}
+
+		return this.defaultValue(all, overrides) || false;
 	}
 }
 
@@ -111,7 +236,7 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 
 	files: { [fileName: string]: LocationFile };
 	entries: { [name: string]: ConfigLocation };
-
+	staticConf: ConfigOverride[];
 	diags: vscode.DiagnosticCollection;
 
 	operatorCompletions: vscode.CompletionItem[];
@@ -153,6 +278,7 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 		dflt.insertText = new vscode.SnippetString('default ');
 		dflt.insertText.appendPlaceholder('value');
 		this.operatorCompletions.push(dflt);
+		this.staticConf = [];
 
 		this.operatorCompletions.forEach(c => c.commitCharacters = [' ']);
 
@@ -160,6 +286,7 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 		help.insertText = new vscode.SnippetString('help \n  ');
 		help.insertText.appendTabstop();
 		this.operatorCompletions.push(help);
+		this.diags = vscode.languages.createDiagnosticCollection('kconfig');
 
 		vscode.workspace.onDidOpenTextDocument(doc => this.scanDoc(doc, false));
 		vscode.workspace.onDidChangeTextDocument(e => {
@@ -181,7 +308,6 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 			this.scanDoc(e.document, true, false);
 		});
 
-		this.diags = vscode.languages.createDiagnosticCollection('kconfig');
 	}
 
 	async doScan(): Promise<string> {
@@ -206,6 +332,7 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 
 	scanText(uri: vscode.Uri, text: string, reparse: boolean=true, recursive?: boolean, env: Environment = {}, dependencies:string[]=[]) {
 		var file: LocationFile;
+		var choice: ConfigLocation | null = null;
 
 		if (uri.fsPath in this.files) {
 			if (!reparse) {
@@ -218,140 +345,189 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 			this.files[uri.fsPath] = file;
 		}
 		var lines = text.split(/\r?\n/g);
-		if (lines) {
+		if (!lines) {
+			return;
+		}
+
+		if (recursive === undefined) {
+			recursive = getConfig('recursive') as boolean;
 			if (recursive === undefined) {
-				recursive = getConfig('recursive') as boolean;
-				if (recursive === undefined) {
-					recursive = true;
+				recursive = true;
+			}
+		}
+		var entry: ConfigLocation | null = null;
+		var help = false;
+		var helpIndent: string | null = null;
+		for (var lineNumber = 0; lineNumber < lines.length; lineNumber++) {
+			var line = envReplace(lines[lineNumber], env);
+			if (line.length === 0) {
+				continue;
+			}
+
+			if (help) {
+				var indent = line.match(/^\s*/)![0];
+				if (helpIndent === null) {
+					helpIndent = indent;
+				}
+				if (indent.startsWith(helpIndent)) {
+					if (entry) {
+						entry.help += ' ' + line.trim();
+					}
+				} else {
+					help = false;
+					if (entry && entry.help) {
+						entry.help = entry.help.trim();
+					}
 				}
 			}
-			var entry: ConfigLocation | null = null;
-			var help = false;
-			var helpIndent: string | null = null;
-			for (var lineNumber = 0; lineNumber < lines.length; lineNumber++) {
-				var line = lines[lineNumber];
-				if (line.length === 0) {
-					continue;
-				}
-				var match = line.match(/^(\s*(?<kind>menuconfig|config|choice)\s+)(?<name>[^\s#]+)/);
-				if (match) {
-					var name = envReplace(match.groups!['name'], env);
-					var location = new vscode.Location(uri, new vscode.Position(lineNumber, match[1].length));
-					if (name in this.entries) {
-						entry = this.entries[name];
-						file.entries[name] = entry;
-						if (!entry.locations.find(loc => loc.uri.fsPath === uri.fsPath && loc.range.start.line === lineNumber)) {
-							entry.locations.push(location);
-						}
-					} else {
-						entry = new ConfigLocation(name, location, match.groups!['kind']);
-						file.entries[name] = entry;
-						this.entries[name] = entry;
+			if (help) {
+				continue;
+			}
+
+			var match = line.match(/^(\s*(?<kind>menuconfig|config)\s+)(?<name>[\d\w_]+)/);
+			var location;
+			var name: string;
+			if (match) {
+				name = match.groups!['name'];
+				location = new vscode.Location(uri, new vscode.Position(lineNumber, match[1].length));
+				if (name in this.entries) {
+					entry = this.entries[name];
+					file.entries[name] = entry;
+					if (!entry.locations.find(loc => loc.uri.fsPath === uri.fsPath && loc.range.start.line === lineNumber)) {
+						entry.locations.push(location);
 					}
-					entry.dependencies = entry.dependencies.concat(dependencies.filter(d => !(entry!.dependencies.includes(d))));
-					continue;
+				} else {
+					entry = new ConfigLocation(name, location, match.groups!['kind'] as ConfigKind);
+					file.entries[name] = entry;
+					this.entries[name] = entry;
 				}
-				match = line.match(/^(\s*(source|rsource|osource)\s+)"([^"]+)"/);
-				if (match) {
-					var includeFile = resolvePath(match[3], match[2] === 'rsource' ? path.dirname(uri.fsPath) : undefined);
-					if (includeFile) {
-						if (recursive) {
-							var matches = glob.sync(includeFile);
-							var range = new vscode.Range(new vscode.Position(lineNumber, match![1].length + 1),
-														 new vscode.Position(lineNumber, match![0].length - 1));
-							matches.forEach(match => {
-								this.scanFile(match, true, recursive, Object.assign({}, env)); // assign clones the object
-								if (fs.existsSync(match)) {
-									var link = new vscode.DocumentLink(range, vscode.Uri.file(match));
-									link.tooltip = match;
-									file.links.push(link);
-								}
-							});
-						}
+				entry.dependencies = entry.dependencies.concat(dependencies.filter(d => !(entry!.dependencies.includes(d))));
+
+				if (choice) {
+					var dflt = choice.defaults.find(d => d.value === name);
+					if (dflt) {
+						entry.defaults.push({ value: 'y', condition: dflt.condition });
 					}
-					continue;
 				}
-				match = line.match(/^\s*if\s+([\w\d_-]+)/);
-				if (match) {
-					var dep = envReplace(match[1], env);
-					if (!dependencies.includes(dep)) {
-						dependencies.push(dep);
-					}
-					continue;
+
+				if (match.groups!['kind'] === 'menuconfig') {
+					dependencies.push(name);
 				}
-				match = line.match(/^\s*endif/);
-				if (match) {
-					dependencies.pop();
-					continue;
-				}
-				if (entry !== null) {
-					if (help) {
-						var indent = line.match(/^\s*/)![0];
-						if (helpIndent === null) {
-							helpIndent = indent;
-						}
-						if (indent.startsWith(helpIndent)) {
-							entry.help += ' ' + line.trim();
-						} else {
-							help = false;
-							if (entry.help) {
-								entry.help = envReplace(entry.help, env).trim();
+				continue;
+			}
+			match = line.match(/^(\s*)choice(?:\s+([\d\w_]+))?/);
+			if (match) {
+				location = new vscode.Location(uri, new vscode.Position(lineNumber, match[1].length));
+				name = match[2] || `<choice @ ${uri.fsPath}:${lineNumber}>`;
+				entry = new ConfigLocation(name, location, 'choice');
+				choice = entry;
+				continue;
+			}
+			match = line.match(/^(\s*(source|rsource|osource)\s+)"([^"]+)"/);
+			if (match) {
+				var includeFile = resolvePath(match[3], match[2] === 'rsource' ? path.dirname(uri.fsPath) : undefined);
+				if (includeFile) {
+					if (recursive) {
+						var matches = glob.sync(includeFile);
+						var range = new vscode.Range(new vscode.Position(lineNumber, match![1].length + 1),
+														new vscode.Position(lineNumber, match![0].length - 1));
+						matches.forEach(match => {
+							this.scanFile(match, true, recursive, Object.assign({}, env)); // assign clones the object
+							if (fs.existsSync(match)) {
+								var link = new vscode.DocumentLink(range, vscode.Uri.file(match));
+								link.tooltip = match;
+								file.links.push(link);
 							}
-						}
+						});
 					}
-					if (help) {
-						continue;
+				}
+				continue;
+			}
+			match = line.match(/^\s*if\s+([^#]+)/);
+			if (match) {
+				var dep = match[1];
+				if (!dependencies.includes(dep)) {
+					dependencies.push(dep);
+				}
+				continue;
+			}
+			match = line.match(/^\s*(endif|endmenu)/);
+			if (match) {
+				dependencies.pop();
+				continue;
+			}
+			match = line.match(/^\s*endchoice\b/);
+			if (match) {
+				choice = null;
+				continue;
+			}
+			if (entry !== null) {
+				match = line.match(/(bool|tristate|string|hex|int)(?:\s+"([^"]+)")?/);
+				if (match) {
+					entry.type = match[1] as ConfigValueType;
+					entry.text = match[2];
+					continue;
+				}
+				match = line.match(/^\s*depends\s+on\s+([^#]+)/);
+				if (match) {
+					var depOn = match[1];
+					if (!dependencies.includes(depOn)) {
+						entry.dependencies.push(depOn);
 					}
-					match = line.match(/(bool|tristate|string|hex|int)(?:\s+"([^"]+)")?/);
-					if (match) {
-						entry.type = match[1];
-						entry.text = match[2] ? envReplace(match[2], env) : undefined;
-						continue;
+					continue;
+				}
+				match = line.match(/^\s*select\s+([\w\d_]+)(?:\s+if\s+([^#]+))?/);
+				if (match) {
+					entry.selects.push({name: match[1], condition: match[2]});
+					continue;
+				}
+				if (match) {
+					entry.type = match[1];
+					entry.text = match[2];
+					continue;
+				}
+				match = line.match(/^\s*help\s*$/);
+				if (match) {
+					help = true;
+					helpIndent = null;
+					entry.help = '';
+					continue;
+				}
+				match = line.match(/^\s*([\w\d_\-]+)\s*=\s*([\w\d_\-]+)$/);
+				if (match) {
+					env[match[1]] = match[2];
+					continue;
+				}
+				var ifStatement;
+				match = line.match(/^\s*default\s+([^#]+)/);
+				if (match) {
+					ifStatement = match[1].match(/(.*)if\s+([^#]+)/);
+					if (ifStatement) {
+						entry.defaults.push({ value: ifStatement[1], condition: ifStatement[2] });
+					} else {
+						entry.defaults.push({ value: match[1] });
 					}
-					match = line.match(/^\s*depends\s+on\s+([\w\d_-]+)/);
-					if (match) {
-						var depOn = envReplace(match[1], env);
-						if (!dependencies.includes(depOn)) {
-							entry.dependencies.push(depOn);
-						}
-						continue;
+					continue;
+				}
+				match = line.match(/^\s*def_(bool|tristate)\s+([^#]+)/);
+				if (match) {
+					entry.type = match[1] as ConfigValueType;
+					ifStatement = match[2].match(/(.*)if\s+([^#]+)/);
+					if (ifStatement) {
+						entry.defaults.push({ value: ifStatement[1], condition: ifStatement[2] });
+					} else {
+						entry.defaults.push({ value: match[2] });
 					}
-					match = line.match(/^\s*select\s+([\w\d_-]+)/);
-					if (match) {
-						var select = envReplace(match[1], env);
-						entry.selects.push(select);
-						continue;
-					}
-					if (match) {
-						entry.type = match[1];
-						entry.text = match[2] ? envReplace(match[2], env) : undefined;
-						continue;
-					}
-					match = line.match(/^\s*help\s*$/);
-					if (match) {
-						help = true;
-						helpIndent = null;
-						entry.help = '';
-						continue;
-					}
-					match = line.match(/^\s*([\w\d_\-]+)\s*=\s*([\w\d_\-]+)$/);
-					if (match) {
-						env[match[1]] = match[2];
-						continue;
-					}
-					match = line.match(/^\s*default\s+(.*?)(?:#|if\s+(.*)|$)/);
-					if (match) {
-						entry.defaults.push({ value: envReplace(match[1], env), condition: match[2] ? envReplace(match[2], env) : undefined });
-						continue;
-					}
-					match = line.match(/^\s*range\s+(\S+|\([^)]+\))\s+(\S+|\([^)]+\))/);
-					if (match) {
-						entry.range = {
-							min: envReplace(match[1], env),
-							max: envReplace(match[2], env),
-						};
-						continue;
-					}
+					continue;
+				}
+				match = line.match(/^\s*range\s+([\w\d_]+)\s+([\w\d_]+)(?:\s+if\s+([^#]+))?/);
+				if (match) {
+					entry.ranges.push({
+						min: match[1],
+						max: match[2],
+						condition: match[3],
+					});
+					continue;
 				}
 			}
 		}
@@ -380,125 +556,149 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 		this.scanText(vscode.Uri.file(fileName), buf.toString(), reparse, recursive, env);
 	}
 
+	loadConfOptions(): ConfigOverride[] {
+		var conf: { [config: string]: string | boolean | number } = getConfig('conf');
+		var entries: ConfigOverride[] = [];
+		Object.keys(conf).forEach(c => {
+			var e = this.getEntry(c);
+			if (e) {
+				var value;
+				if (value === true) {
+					value = 'y';
+				} else if (value === false) {
+					value = 'n';
+				} else {
+					value = conf[c].toString();
+				}
+				entries.push({ config: e, value: value });
+			}
+		});
+
+		var conf_files: string[] = getConfig('conf_files');
+		if (conf_files) {
+			conf_files.forEach(f => {
+				try {
+					var text = fs.readFileSync(pathReplace(f), 'utf-8');
+				} catch (e) {
+					if (e instanceof Error) {
+						if ('code' in e && e['code'] === 'ENOENT') {
+							vscode.window.showWarningMessage(`File "${f}" not found`);
+						} else {
+							vscode.window.showWarningMessage(`Error while reading conf file ${f}: ${e.message}`);
+						}
+					}
+					return;
+				}
+				var lines = text.split(/\r?\n/g);
+				lines.forEach(line => {
+					var e = this.parseLine(line, []);
+					if (e) {
+						entries.push(e);
+					}
+				});
+			});
+		}
+
+		return entries;
+	}
+
+	parseLine(line: string, diags: vscode.Diagnostic[], lineNumber?: number): ConfigOverride | undefined {
+		var match = line.match(/^\s*CONFIG_([^\s=]+)\s*(?:=\s*("[^"]*"|[ynm]\b|0x[a-fA-F\d]+\b|\d+\b))?/);
+		if (match) {
+			var override;
+			var thisLine = lineNumber !== undefined ? new vscode.Position(lineNumber, 0) : undefined;
+			if (match[2]) {
+				var entry = this.getEntry(match[1]);
+				if (entry) {
+					if (entry.isValidOverride(match[2])) {
+						override = { config: entry, value: match[2], line: lineNumber };
+					} else if (thisLine !== undefined) {
+						diags.push(new vscode.Diagnostic(new vscode.Range(thisLine, thisLine),
+							`Invalid value. Entry ${match[1]} is ${entry.type}.`,
+							vscode.DiagnosticSeverity.Error));
+					}
+				} else if (thisLine !== undefined) {
+					diags.push(new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), 'Unknown entry ' + match[1], vscode.DiagnosticSeverity.Error));
+				}
+
+				var trailing = line.slice(match[0].length).match(/^\s*([^#\s]+[^#]*)/);
+				if (trailing && thisLine !== undefined) {
+					var start = match[0].length + trailing[0].indexOf(trailing[1]);
+					diags.push(new vscode.Diagnostic(new vscode.Range(thisLine.line, start, thisLine.line, start + trailing[1].trimRight().length),
+						'Unexpected trailing characters',
+						vscode.DiagnosticSeverity.Error));
+				}
+				return override;
+			} else if (thisLine !== undefined) {
+				diags.push(new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), 'Missing value for config ' + match[1], vscode.DiagnosticSeverity.Error));
+			}
+		}
+	}
+
 	servePropertiesDiag(doc: vscode.TextDocument) {
 		var text = doc.getText();
 		var lines = text.split(/\r?\n/g);
 		var diags: vscode.Diagnostic[] = [];
-		var configurations: { entry: ConfigLocation, value: string, line: number }[] = [];
+		var configurations: ConfigOverride[] = this.loadConfOptions();
 		lines.forEach((line, lineNumber) => {
-			var match = line.match(/^\s*CONFIG_([^\s=]+)\s*(?:=\s*("[^"]*"|[ynm]\b|0x[a-fA-F\d]+\b|\d+\b))?/);
-			if (match) {
-				var thisLine = new vscode.Position(lineNumber, 0);
-				if (match[2]) {
-					var entry = this.getEntry(match[1]);
-					if (entry) {
-						if (entry.type && ['int', 'hex'].includes(entry.type) && entry.range) {
-							var value = parseInt(match[2]);
-							var range = { min: parseInt(entry.range.min), max: parseInt(entry.range.max) };
-							if ((range.min !== undefined && value < range.min) || (range.max !== undefined && value > range.max)) {
-								diags.push(new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), `Entry ${match[1]} outside range \`${entry.range.min}\`-\`${entry.range.max}\``, vscode.DiagnosticSeverity.Error));
-							}
-						}
-						switch (entry.type) {
-							case 'bool':
-								if (!['y', 'n'].includes(match[2])) {
-									diags.push(new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), `Entry ${match[1]} is a boolean, should be 'y' or 'n'`, vscode.DiagnosticSeverity.Error));
-								}
-								break;
-							case 'tristate':
-								if (!['y', 'n', 'm'].includes(match[2])) {
-									diags.push(new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), `Entry ${match[1]} is a tristate, should be 'y', 'n' or 'm'`, vscode.DiagnosticSeverity.Error));
-								}
-								break;
-							case 'hex':
-								if (!match[2].match(/^0x[a-fA-F\d]+/)) {
-									diags.push(new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), `Entry ${match[1]} is a hex, should be on the form '0x1bad234'`, vscode.DiagnosticSeverity.Error));
-								}
-								break;
-							case 'int':
-								if (!match[2].match(/^\d+/)) {
-									diags.push(new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), `Entry ${match[1]} is an int, should be on the form '1234'`, vscode.DiagnosticSeverity.Error));
-								}
-								break;
-							case 'string':
-								if (!match[2].match(/^"[^"]*"/)) {
-									diags.push(new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), `Entry ${match[1]} is a string, should be on the form "text"`, vscode.DiagnosticSeverity.Error));
-								}
-								break;
-							default:
-								diags.push(new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), `Entry ${match[1]} is of unknown type`, vscode.DiagnosticSeverity.Warning));
-								break;
-						}
-						if (
-							(entry.defaults.length === 0 && entry.type && ['bool', 'tristate'].includes(entry.type) && match[2] === 'n') ||
-							(entry.defaults.length === 1 && !entry.defaults[0].condition && entry.defaults[0].value === match[2])) {
-							diags.push(new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), `Entry ${match[1]} is redundant (same as default)`, vscode.DiagnosticSeverity.Hint));
-						}
-
-						var duplicate = configurations.find(c => c.entry === entry);
-						if (duplicate) {
-							var diag = new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), `Entry ${match[1]} is already defined`, vscode.DiagnosticSeverity.Warning);
-							diag.relatedInformation = [{ location: new vscode.Location(doc.uri, new vscode.Position(duplicate.line, 0)), message: 'Previous declaration here' }];
-							diags.push(diag);
-						} else {
-							configurations.push({ entry: entry, value: match[2], line: lineNumber });
-						}
-					} else {
-						diags.push(new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), 'Unknown entry ' + match[1], vscode.DiagnosticSeverity.Error));
+			var override = this.parseLine(line, diags, lineNumber);
+			if (override) {
+				var duplicate = configurations.find(c => c.config === override!.config);
+				if (duplicate) {
+					var thisLine = new vscode.Position(lineNumber, 0);
+					var diag = new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), `Entry ${override!.config.name} is already defined`, vscode.DiagnosticSeverity.Warning);
+					if (duplicate.line !== undefined) {
+						diag.relatedInformation = [{ location: new vscode.Location(doc.uri, new vscode.Position(duplicate.line, 0)), message: 'Previous declaration here' }];
 					}
-
-					var trailing = line.slice(match[0].length).match(/^\s*([^#\s]+[^#]*)/);
-					if (trailing) {
-						var start = match[0].length + trailing[0].indexOf(trailing[1]);
-						diags.push(new vscode.Diagnostic(new vscode.Range(thisLine.line, start, thisLine.line, start + trailing[1].trimRight().length), 'Unexpected trailing characters', vscode.DiagnosticSeverity.Error));
-					}
+					diags.push(diag);
 				} else {
-					diags.push(new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), 'Missing value for config ' + match[1], vscode.DiagnosticSeverity.Error));
+					configurations.push(override);
 				}
 			}
 		});
 
-		// TODO: This part is quite complex with selects, defaults and dependencies all over. Needs some proper consideration to work.
-		// configurations.filter(config => config.entry.type === 'bool' && config.value === 'y' && config.line !== undefined).forEach(config => {
-		// 	config.entry.dependencies.map(dep => this.getEntry(dep)).forEach(dep => {
-		// 		if (dep && dep.type === 'bool') {
-		// 			var listing = configurations.find(config => config.entry === dep);
-		// 			if ((listing && listing.value === 'n') ||
-		// 				(!dep.defaults.find(dflt => dflt.value === 'y') && !listing && !this.getSelectorsRecursive(dep, configurations).)) {
-		// 				var thisLine = new vscode.Position(config.line!, 0);
-		// 				diags.push(new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), `${config.entry.name} depends on ${dep.name}, which doesn't appear to be enabled.`, vscode.DiagnosticSeverity.Warning));
-		// 			}
-		// 		}
-		// 	});
-		// });
-
-		this.diags.set(doc.uri, diags);
-	}
-
-	getSelectors(entry: ConfigLocation): ConfigLocation[] {
 		var all = this.getAll();
-		return all.filter(e => e.selects.includes(entry.name));
-	}
-	// getSelectorsRecursive(entry: ConfigLocation, configItems: {entry: ConfigLocation, value: string, line?: number}[]): ConfigLocation[] {
-	// 	var all = this.getAll();
-	// 	var selectors: ConfigLocation[] = [];
-	// 	all.filter(e => e.selects.includes(entry.name) && e.isEnabled(configItems.find(c => c.entry === e).value) !selectors.includes(entry)).forEach(e => {
-	// 		selectors.push(e);
-	// 		selectors = selectors.concat(this.getSelectorsRecursive(e, configItems).filter(e => !selectors.includes(e)));
-	// 	});
-	// 	return selectors;
-	// }
 
-	getSelections(entry: ConfigLocation): ConfigLocation[] {
-		var selects: ConfigLocation[] = [];
-		entry.selects.forEach(sel => {
-			var selected = this.getEntry(sel);
-			if (selected && selected.type === 'bool' && !selects.includes(selected)) {
-				selects.push(selected);
-				selects = selects.concat(this.getSelections(selected));
+		// Post processing, now that all values are known:
+		configurations.forEach(c => {
+			var override = c.config.resolveValueString(c.value);
+			if (c.line === undefined) {
+				return;
+			}
+
+			var line = new vscode.Range(c.line, 0, c.line, 99999999);
+
+			if (c.config.type && ['int', 'hex'].includes(c.config.type)) {
+
+				var range = c.config.getRange(all, configurations);
+				if ((range.min !== undefined && override < range.min) || (range.max !== undefined && override > range.max)) {
+					diags.push(new vscode.Diagnostic(line,
+						`Entry ${c.value} outside range \`${range.min}\`-\`${range.max}\``,
+						vscode.DiagnosticSeverity.Error));
+				}
+			}
+			if (override === c.config.defaultValue(all, configurations)) {
+				diags.push(new vscode.Diagnostic(line,
+					`Entry ${c.config.name} is redundant (same as default)`,
+					vscode.DiagnosticSeverity.Hint));
+			}
+
+			var actualValue = c.config.evaluate(all, configurations);
+			// tslint:disable-next-line: triple-equals (want to ignore false != undefined)
+			if (override != actualValue) {
+				if (!actualValue) {
+					diags.push(new vscode.Diagnostic(line,
+						`Entry ${c.config.name} isn't used.`,
+						vscode.DiagnosticSeverity.Warning));
+				} else {
+					diags.push(new vscode.Diagnostic(line,
+						`Entry ${c.config.name} assigned value ${c.value}, but evaluated to ${c.config.toValueString(actualValue)}`,
+						vscode.DiagnosticSeverity.Warning));
+				}
 			}
 		});
-		return selects;
+
+		this.diags.set(doc.uri, diags);
 	}
 
 	deleteEntry(entry: ConfigLocation) {
@@ -549,8 +749,8 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 		text.push(new vscode.MarkdownString(`${entry.text || entry.name}`));
 		if (entry.type) {
 			var typeLine = new vscode.MarkdownString(`\`${entry.type}\``);
-			if (entry.range) {
-				typeLine.appendMarkdown(`\t\tRange: \`${entry.range.min}\`-\`${entry.range.max}\``);
+			if (entry.ranges.length === 1) {
+				typeLine.appendMarkdown(`\t\tRange: \`${entry.ranges[0].min}\`-\`${entry.ranges[0].max}\``);
 			}
 			text.push(typeLine);
 		}
@@ -627,8 +827,8 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 			return item;
 		}
 		var doc = new vscode.MarkdownString(`\`${e.type}\``);
-		if (e.range) {
-			doc.appendMarkdown(`\t\tRange: \`${e.range.min}\`-\`${e.range.max}\``);
+		if (e.ranges.length === 1) {
+			doc.appendMarkdown(`\t\tRange: \`${e.ranges[0].min}\`-\`${e.ranges[0].max}\``);
 		}
 		if (e.help) {
 			doc.appendText('\n\n');
@@ -665,7 +865,7 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 			return null;
 		}
 
-		return this.getSelectors(entry).map(s => s.locations[0]);
+		return []; // TODO
 	}
 
 }
@@ -710,8 +910,8 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(disposable);
 	disposable = vscode.languages.registerDocumentLinkProvider({ language: 'kconfig', scheme: 'file' }, langHandler);
 	context.subscriptions.push(disposable);
-	disposable = vscode.languages.registerReferenceProvider({ language: 'kconfig', scheme: 'file' }, langHandler);
-	context.subscriptions.push(disposable);
+	// disposable = vscode.languages.registerReferenceProvider({ language: 'kconfig', scheme: 'file' }, langHandler);
+	// context.subscriptions.push(disposable);
 }
 
 // this method is called when your extension is deactivated

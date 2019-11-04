@@ -37,6 +37,22 @@
 								"type": "string"
 							}
 						}
+					},
+					"kconfig.conf": {
+						"type": "object",
+						"description": "Static configuration items entries as an object.",
+						"patternProperties":  {
+							"^CONFIG_\\w[\\w_\\d]*": {
+								"type": ["string", "integer", "boolean"]
+							}
+						},
+						"additionalProperties": false
+					},
+					"kconfig.conf_files": {
+						"type": "array",
+						"items": {
+							"type":"string"
+						}
 					}
 				}
 			}

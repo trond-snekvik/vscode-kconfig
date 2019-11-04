@@ -31,6 +31,7 @@
                 "1": {"name": "keyword.control"}
             },
             "patterns": [
+                {"include": "#if"},
                 {"include": "#expression"}
             ]
         },
@@ -58,10 +59,19 @@
             ]
         },
         {
-            "begin": "^\\s*(visible if|depends on|select|default|def_bool|def_tristate)\\s+",
+            "begin": "^\\s*(visible if|depends on)\\s+",
             "end": "(#|$)",
             "beginCaptures": {"1": {"name": "keyword.control"}},
             "patterns": [
+                {"include": "#expression"}
+            ]
+        },
+        {
+            "begin": "^\\s*(select|default|def_bool|def_tristate)\\s+",
+            "end": "(#|$)",
+            "beginCaptures": {"1": {"name": "keyword.control"}},
+            "patterns": [
+                {"include": "#if"},
                 {"include": "#expression"}
             ]
         },
@@ -117,6 +127,9 @@
                     "include": "#number"
                 },
                 {
+                    "include": "#tristate"
+                },
+                {
                     "include": "#paren-expression"
                 },
                 {
@@ -135,8 +148,22 @@
             "name": "keyword.operator"
         },
         "number": {
-            "match": "[+-]?(0x[0-9a-fA-F]+|[0-9]+)",
+            "match": "[+-]?(0x[\\da-fA-F]+|[0-9]+)",
             "name": "constant.numeric"
+        },
+        "tristate": {
+            "match": "\\b[ymn]\\b",
+            "name": "constant.character"
+        },
+        "if": {
+            "begin": "\\bif\\s+",
+            "end": "($|#)",
+            "beginCaptures": {
+                "0": {"name": "keyword.control"}
+            },
+            "patterns":[
+                {"include": "#expression"}
+            ]
         },
         "line-continuation": {
             "begin": "\\\\$\\n?",

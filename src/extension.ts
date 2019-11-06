@@ -349,12 +349,9 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 
 	}
 
-	async doScan(): Promise<string> {
+	doScan(): Promise<string> {
 		var hrTime = process.hrtime();
 		var start = (hrTime[0] * 1000 + hrTime[1] / 1000000);
-		if (vscode.window.activeTextEditor) {
-			this.scanDoc(vscode.window.activeTextEditor.document);
-		}
 		var root = resolvePath(getConfig('root'));
 		if (root) {
 			this.scanFile(root, false);
@@ -1175,25 +1172,24 @@ export async function activate(context: vscode.ExtensionContext) {
 	var status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 10000);
 	context.subscriptions.push(status);
 
-	status.text = ' $(sync) kconfig';
+	status.text = ' $(sync~spin) kconfig';
 	var root = resolvePath(getConfig('root'));
 	if (root) {
 		status.tooltip = `Starting from ${root}`;
 	}
 	status.show();
-	setTimeout(() => {
-		langHandler.doScan().then(result => {
-			status.text = `$(verified) kconfig complete (${result})`;
-		}).catch(e => {
-			status.text = `$(alert) kconfig failed`;
-			status.tooltip = e;
-		}).finally(() => {
-			setTimeout(() => {
-				status.hide();
-				status.dispose();
-			}, 10000);
-		});
-	}, 50);
+
+	langHandler.doScan().then(result => {
+		status.text = `kconfig complete (${result})`;
+	}).catch(e => {
+		status.text = `$(alert) kconfig failed`;
+		status.tooltip = e;
+	}).finally(() => {
+		setTimeout(() => {
+			status.hide();
+			status.dispose();
+		}, 10000);
+	});
 
 
 	var selector = [{ language: 'kconfig', scheme: 'file' }, { language: 'properties', scheme: 'file' }];

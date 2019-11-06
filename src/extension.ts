@@ -857,11 +857,13 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 									newEntries.push(o);
 								}
 							});
-							if (newEntries.length === 0 && existingEntries.length === 0) {
+
+							var totLen = newEntries.length + existingEntries.length;
+							if (totLen === 0) {
 								continue;
 							}
 
-							action = new vscode.CodeAction('Add missing dependencies', vscode.CodeActionKind.Refactor);
+							action = new vscode.CodeAction(`Add ${totLen} missing ${totLen > 1 ? 'dependencies' : 'dependency'}`, vscode.CodeActionKind.Refactor);
 							action.edit = new vscode.WorkspaceEdit();
 							if (newEntries.length) {
 								action.edit.insert(doc.uri,

@@ -473,7 +473,7 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 				choice = entry;
 				continue;
 			}
-			match = line.match(/^(\s*(source|rsource|osource)\s+)"([^"]+)"/);
+			match = line.match(/^(\s*(source|rsource|osource)\s+)"((?:.*?[^\\])?)"/);
 			if (match) {
 				var includeFile = resolvePath(match[3], match[2] === 'rsource' ? path.dirname(uri.fsPath) : undefined);
 				if (includeFile) {
@@ -703,7 +703,7 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 	}
 
 	parseLine(line: string, diags: vscode.Diagnostic[], lineNumber?: number): ConfigOverride | undefined {
-		var match = line.match(/^\s*CONFIG_([^\s=]+)\s*(?:=\s*("[^"]*"|[ynm]\b|0x[a-fA-F\d]+\b|\d+\b))?/);
+		var match = line.match(/^\s*CONFIG_([^\s=]+)\s*(?:=\s*(".*?[^\\]"|""|[ynm]\b|0x[a-fA-F\d]+\b|\d+\b))?/);
 		if (match) {
 			var override;
 			var thisLine = lineNumber !== undefined ? new vscode.Position(lineNumber, 0) : undefined;

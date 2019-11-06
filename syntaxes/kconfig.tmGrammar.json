@@ -91,8 +91,14 @@
         },
         "string": {
             "begin": "\"",
-            "end": "\"",
-            "name": "string.quoted.double"
+            "end": "(?<!\\\\)\"",
+            "name": "string.quoted.double",
+            "patterns": [
+                {
+                    "match": "\\\\.",
+                    "name": "constant.character.escape"
+                }
+            ]
         },
         "symbol": {
             "match": "[a-zA-Z\\-_0-9]+",

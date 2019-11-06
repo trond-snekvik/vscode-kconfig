@@ -144,6 +144,34 @@ export class ConfigLocation {
 		return this.dependencies.find(d => !resolveExpression(d, all, overrides));
 	}
 
+	selector(all: ConfigLocation[], overrides: ConfigOverride[] = []) {
+
+
+		if (this.type !== 'bool' && this.type !== 'tristate') {
+			return undefined;
+		}
+
+		var selectorFilter = (s: { name: string, condition?: string }) => {
+			return s.name === this.name && (s.condition === undefined || resolveExpression(s.condition, all, overrides));
+		};
+
+		var select = overrides.find(
+			o => (
+				(o.config.type === 'bool' || o.config.type === 'tristate') &&
+				o.config.isEnabled(o.value) &&
+				o.config.selects.find(selectorFilter)
+			)
+		) || all.find(
+			c => (
+				(c.type === 'bool' || c.type === 'tristate') &&
+				c.selects.find(selectorFilter) &&
+				c.evaluate(all, overrides)
+			)
+		);
+
+		return select;
+	}
+
 	evaluate(all: ConfigLocation[], overrides: ConfigOverride[] = []): ConfigValue {
 		// All dependencies must be true
 		if (this.missingDependency(all, overrides)) {
@@ -155,28 +183,8 @@ export class ConfigLocation {
 			return this.resolveValueString(override.value);
 		}
 
-		if (this.type === 'bool' || this.type === 'tristate') {
-			var selectorFilter = (s: { name: string, condition?: string }) => {
-				return s.name === this.name && (s.condition === undefined || resolveExpression(s.condition, all, overrides));
-			};
-
-			var select = overrides.find(
-				o => (
-					(o.config.type === 'bool' || o.config.type === 'tristate') &&
-					o.config.isEnabled(o.value) &&
-					o.config.selects.find(selectorFilter)
-				)
-			) || all.find(
-				c => (
-					(c.type === 'bool' || c.type === 'tristate') &&
-					c.selects.find(selectorFilter) &&
-					c.evaluate(all, overrides)
-				)
-			);
-
-			if (select) {
-				return true;
-			}
+		if (this.selector(all, overrides)) {
+			return true;
 		}
 
 		return this.defaultValue(all, overrides) || false;
@@ -665,6 +673,15 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 		var all = this.getAll();
 		var actions: vscode.CodeAction[] = [];
 
+		var addRedundancyAction = (c: ConfigOverride, diag: vscode.Diagnostic) => {
+			var action = new vscode.CodeAction(`Remove redundant entry CONFIG_${c.config.name}`, vscode.CodeActionKind.Refactor);
+			action.edit = new vscode.WorkspaceEdit();
+			action.edit.delete(doc.uri, new vscode.Range(c.line!, 0, c.line! + 1, 0));
+			action.diagnostics = [diag];
+			action.isPreferred = true;
+			actions.push(action);
+		};
+
 		// Post processing, now that all values are known:
 		configurations.forEach(c => {
 			if (c.line === undefined) {
@@ -675,6 +692,24 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 			var line = new vscode.Range(c.line, 0, c.line, 99999999);
 			var diag: vscode.Diagnostic;
 			var action: vscode.CodeAction;
+
+			if (!c.config.text) {
+				diag = new vscode.Diagnostic(line,
+					`Entry ${c.config.name} has no effect (has no prompt)`,
+					vscode.DiagnosticSeverity.Warning);
+				diags.push(diag);
+				addRedundancyAction(c, diag);
+
+				// Find all selectors:
+				var selectors = all.filter(e => e.selects.find(s => s.name === c.config.name && (!s.condition || resolveExpression(s.condition, all, configurations))));
+				actions.push(...selectors.map(s => {
+					var action = new vscode.CodeAction(`Replace with CONFIG_${s.name}`, vscode.CodeActionKind.QuickFix);
+					action.edit = new vscode.WorkspaceEdit();
+					action.edit.replace(doc.uri, line, `CONFIG_${s.name}=y`);
+					action.diagnostics = [diag];
+					return action;
+				}));
+			}
 
 			if (c.config.type && ['int', 'hex'].includes(c.config.type)) {
 
@@ -694,12 +729,7 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 				diag.tags = [vscode.DiagnosticTag.Unnecessary];
 				diags.push(diag);
 
-				action = new vscode.CodeAction(`Remove redundant entry CONFIG_${c.config.name}`, vscode.CodeActionKind.Refactor);
-				action.edit = new vscode.WorkspaceEdit();
-				action.edit.delete(doc.uri, new vscode.Range(c.line, 0, c.line + 1, 0));
-				action.diagnostics = [diag];
-				action.isPreferred = true;
-				actions.push(action);
+				addRedundancyAction(c, diag);
 			}
 
 			var missingDependency = c.config.missingDependency(all, configurations);
@@ -710,12 +740,7 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 						vscode.DiagnosticSeverity.Warning);
 					diag.tags = [vscode.DiagnosticTag.Unnecessary];
 
-					action = new vscode.CodeAction(`Remove redundant entry CONFIG_${c.config.name}`, vscode.CodeActionKind.Refactor);
-					action.edit = new vscode.WorkspaceEdit();
-					action.edit.delete(doc.uri, new vscode.Range(c.line, 0, c.line + 1, 0));
-					action.diagnostics = [diag];
-					action.isPreferred = true;
-					actions.push(action);
+					addRedundancyAction(c, diag);
 				} else {
 					diag = new vscode.Diagnostic(line,
 						`Entry ${c.config.name} dependency ${missingDependency} missing.`,
@@ -726,7 +751,7 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 				var variables = tokens
 					.filter(t => t.kind === TokenKind.VAR)
 					.map(t => this.getEntry(t.value))
-					.filter(e => (e && e.type && ['bool', 'tristate'].includes(e.type)));
+					.filter(e => (e && e.text && e.type && ['bool', 'tristate'].includes(e.type)));
 
 				/* Unless the expression is too complex, try all combinations to find one that works: */
 				if (variables.length > 0 && variables.length < 4) {

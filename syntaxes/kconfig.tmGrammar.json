@@ -166,8 +166,8 @@
             ]
         },
         "line-continuation": {
-            "begin": "\\\\$\\n?",
-            "end": "\\n|$",
+            "begin": "\\\\$\\n",
+            "end": "(?<!\\\\)\\n",
             "beginCaptures": {
                 "0": {"name": "constant.character.escape"}
             },

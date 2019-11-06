@@ -402,8 +402,14 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 		var helpIndent: string | null = null;
 		for (var lineNumber = 0; lineNumber < lines.length; lineNumber++) {
 			var line = envReplace(lines[lineNumber], env);
+
 			if (line.length === 0) {
 				continue;
+			}
+
+			/* If lines end with \, the line ending should be ignored: */
+			while (line.endsWith('\\') && lineNumber < lines.length - 1) {
+				line = line.slice(0, line.length - 1) + envReplace(lines[++lineNumber], env);
 			}
 
 			if (help) {

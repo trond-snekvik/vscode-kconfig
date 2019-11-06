@@ -951,7 +951,9 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 	provideDefinition(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken): vscode.ProviderResult<vscode.Location | vscode.Location[] | vscode.LocationLink[]> {
 		var entry = this.getEntry(this.getSymbolName(document, position));
 		if (entry) {
-			return entry.locations;
+			return (entry.locations.length === 1) ?
+				entry.locations :
+				entry.locations.filter(l => l.uri.fsPath !== document.uri.fsPath || !l.range.contains(position));
 		}
 		return null;
 	}

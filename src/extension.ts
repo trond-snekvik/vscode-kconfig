@@ -1091,13 +1091,15 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 		return [];
 	}
 
-	provideReferences(document: vscode.TextDocument, position: vscode.Position, context: vscode.ReferenceContext, token: vscode.CancellationToken): vscode.ProviderResult<vscode.Location[]> {
+	provideReferences(document: vscode.TextDocument,
+		position: vscode.Position,
+		context: vscode.ReferenceContext,
+		token: vscode.CancellationToken): vscode.ProviderResult<vscode.Location[]> {
 		var entry = this.getEntry(this.getSymbolName(document, position));
-		if (!entry) {
+		if (!entry || !entry.type || !['bool', 'tristate'].includes(entry.type)) {
 			return null;
 		}
-
-		return []; // TODO
+		return this.getAll().filter(e => e.selects.find(s => s.name === entry!.name)).map(e => e.locations[0]);
 	}
 
 	provideCodeActions(document: vscode.TextDocument,
@@ -1250,8 +1252,8 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(disposable);
 	disposable = vscode.languages.registerWorkspaceSymbolProvider(langHandler);
 	context.subscriptions.push(disposable);
-	// disposable = vscode.languages.registerReferenceProvider({ language: 'kconfig', scheme: 'file' }, langHandler);
-	// context.subscriptions.push(disposable);
+	disposable = vscode.languages.registerReferenceProvider({ language: 'kconfig', scheme: 'file' }, langHandler);
+	context.subscriptions.push(disposable);
 }
 
 // this method is called when your extension is deactivated

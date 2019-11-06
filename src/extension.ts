@@ -770,7 +770,7 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 		};
 
 		// Post processing, now that all values are known:
-		configurations.forEach(c => {
+		configurations.forEach((c, i) => {
 			if (c.line === undefined) {
 				return;
 			}
@@ -883,13 +883,31 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 					}
 				}
 				diags.push(diag);
-			} else {
-				var actualValue = c.config.evaluate(all, configurations);
-				if (override !== actualValue) {
-					diags.push(new vscode.Diagnostic(line,
-						`Entry ${c.config.name} assigned value ${c.value}, but evaluated to ${c.config.toValueString(actualValue)}`,
-						vscode.DiagnosticSeverity.Warning));
+				return;
+			}
+
+			var selector = c.config.selector(all, configurations.filter((_, index) => index !== i));
+			if (selector) {
+				diag = new vscode.Diagnostic(line,
+					`Entry ${c.config.name} is ${c.value === 'n' ? 'ignored' : 'redundant'} (Already selected by ${(selector instanceof ConfigLocation) ? selector.name : selector.config.name})`,
+					c.value === 'n' ? vscode.DiagnosticSeverity.Warning : vscode.DiagnosticSeverity.Hint);
+				if (selector instanceof ConfigLocation) {
+					diag.relatedInformation = [new vscode.DiagnosticRelatedInformation(selector.locations[0], `Selected by ${selector.name}`)];
+				} else if (selector.line !== undefined) {
+					diag.relatedInformation = [new vscode.DiagnosticRelatedInformation(new vscode.Location(doc.uri, new vscode.Position(selector.line, 0)), `Selected by CONFIG_${selector.config.name}=${selector.value}`)];
 				}
+				diag.tags = [vscode.DiagnosticTag.Unnecessary];
+				diags.push(diag);
+				addRedundancyAction(c, diag);
+				return;
+			}
+
+			var actualValue = c.config.evaluate(all, configurations);
+			if (override !== actualValue) {
+				diags.push(new vscode.Diagnostic(line,
+					`Entry ${c.config.name} assigned value ${c.value}, but evaluated to ${c.config.toValueString(actualValue)}`,
+					vscode.DiagnosticSeverity.Warning));
+				return;
 			}
 		});
 

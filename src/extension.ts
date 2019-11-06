@@ -981,10 +981,13 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 	provideCompletionItems(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken, context: vscode.CompletionContext): vscode.ProviderResult<vscode.CompletionItem[] | vscode.CompletionList> {
 		var line = document.lineAt(position.line);
 
+		var wordBase = document.getText(document.getWordRangeAtPosition(position)).slice(0, position.character).replace(/^CONFIG_/, '');
+
 		var isProperties = (document.languageId === 'properties');
-		var entries: vscode.CompletionItem[];
+		var items: vscode.CompletionItem[];
 		if ((document.languageId === 'kconfig' && line.text.match(/(visible if|depends on|select|default|def_bool|def_tristate)/)) || isProperties) {
-			entries = this.getAll().filter(e => !(isProperties && e.kind === 'choice')).map(e => {
+			var entries = this.getAll().filter(e => !(isProperties && e.kind === 'choice') && e.name.startsWith(wordBase));
+			items = entries.slice(0, 500).map(e => {
 				var kinds = {
 					'config': vscode.CompletionItemKind.Variable,
 					'menuconfig': vscode.CompletionItemKind.Class,
@@ -995,8 +998,15 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 				item.sortText = e.name;
 				item.detail = e.text;
 				if (isProperties) {
+					var lineRange = new vscode.Range(position.line, 0, position.line, 999999);
+					var lineText = document.getText(lineRange);
+					var replaceText = lineText.replace(/\s*#.*$/, '');
+					if (replaceText.length > 0) {
+						item.range = new vscode.Range(position.line, 0, position.line, replaceText.length);
+					}
+
 					item.insertText = new vscode.SnippetString(`${item.label}=`);
-					switch (e.type) { // bool|tristate|string|hex|int
+					switch (e.type) {
 						case 'bool':
 							if (e.defaults.length > 0 && e.defaults[0].value === 'y') {
 								item.insertText.appendPlaceholder('n');
@@ -1029,8 +1039,12 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 				}
 				return item;
 			});
-			entries.push(new vscode.CompletionItem('if', vscode.CompletionItemKind.Keyword));
-			return entries;
+
+			if (!isProperties) {
+				items.push(new vscode.CompletionItem('if', vscode.CompletionItemKind.Keyword));
+			}
+
+			return { isIncomplete: (entries.length > 500), items: items };
 		} else {
 			return this.operatorCompletions;
 		}

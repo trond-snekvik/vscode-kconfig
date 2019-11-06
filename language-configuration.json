@@ -1,5 +1,11 @@
 {
-    "folding": {"markers": {"start": "^\\s*(choice|if|menu)", "end": "^\\s*(endchoice|endif|endmenu)"}},
+    "folding": {
+        "markers": {
+            "start": "^\\s*(choice|if|menu)",
+            "end": "^\\s*(endchoice|endif|endmenu)"
+        },
+        "offSide": true
+    },
     "comments": {
         "lineComment": "#"
     },
@@ -30,9 +36,5 @@
             "\""
         ]
     ],
-    "autoCloseBefore": ";:.,=}])>\n\t",
-    "indentationRules": {
-        "increaseIndentPattern": "^\\s*(config|menuconfig|choice|comment)[\\s:]",
-        "decreaseIndentPattern": "^\\s*(config|menuconfig|choice|endchoice|if|endif|menu|endmenu|source|comment)[\\s:]"
-    }
+    "autoCloseBefore": ";:.,=}])>\n\t"
 }

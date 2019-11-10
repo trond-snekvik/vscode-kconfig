@@ -1,13 +1,23 @@
 {
 	"name": "kconfig-lang",
 	"displayName": "kconfig-lang",
-	"description": "Syntax highlighting and basic intellisense for kconfig",
-	"version": "0.0.1",
+	"description": "Syntax highlighting, linting and intellisense for kconfig",
+	"version": "0.5.0",
+	"publisher": "trond-snekvik",
 	"engines": {
 		"vscode": "^1.37.0"
 	},
+	"icon": "doc/kconfig_icon.png",
+	"author": {
+		"email": "trond.snekvik@gmail.com",
+		"name": "Trond Einar Snekvik",
+		"url": "https://github.com/trond-snekvik"
+	},
+	"extensionKind": "workspace",
+	"license": "MIT",
 	"categories": [
-		"Other"
+		"Programming Languages",
+		"Linters"
 	],
 	"activationEvents": [
 		"onLanguage:kconfig",
@@ -41,9 +51,13 @@
 					"kconfig.conf": {
 						"type": "object",
 						"description": "Static configuration items entries as an object.",
-						"patternProperties":  {
+						"patternProperties": {
 							"^CONFIG_\\w[\\w_\\d]*": {
-								"type": ["string", "integer", "boolean"]
+								"type": [
+									"string",
+									"integer",
+									"boolean"
+								]
 							}
 						},
 						"additionalProperties": false
@@ -51,7 +65,7 @@
 					"kconfig.conf_files": {
 						"type": "array",
 						"items": {
-							"type":"string"
+							"type": "string"
 						}
 					}
 				}
@@ -64,9 +78,8 @@
 					"Kconfig"
 				],
 				"filenamePatterns": [
-					"*kconfig*",
-					"*KConfig*",
-					"*Kconfig*"
+					"Kconfig",
+					"Kconfig.*"
 				],
 				"configuration": "./language-configuration.json"
 			}
@@ -93,5 +106,12 @@
 		"tslint": "^5.12.1",
 		"typescript": "^3.3.1",
 		"vscode": "^1.1.28"
+	},
+	"dependencies": {
+		"fuzzysort": "^1.1.4"
+	},
+	"repository": {
+		"url": "https://github.com/trond-snekvik/vscode-kconfig.git",
+		"type": "git"
 	}
 }

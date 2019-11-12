@@ -103,10 +103,23 @@ duplicated in the parsed configuration file, a warning will be produced.
 
 # Zephyr setup
 
+Assuming that the Zephyr environment is set up
+[with West](https://docs.zephyrproject.org/latest/getting_started/index.html#get-the-source-code),
+and VS Code runs as
+[a multi-root workspace](https://code.visualstudio.com/docs/editor/multi-root-workspaces)
+with all the Zephyr project folders as roots:
+
 Zephyr has several environment variables defined:
 - `ARCH`: CPU architecture, e.g. `arm` or `x86`.
 - `BOARD`: Board being used, e.g. `nrf52_pca10040` or `native_posix`.
-- `ARCH_DIR`: The architecture directory, `arch`
+- `ARCH_DIR`: The architecture directory, `arch`.
+- `SOC_DIR`: The SoC directory, `soc`.
 - `BOARD_DIR`: The board directory for the selected board, normally `${workspaceFolder:zephyr}/boards/${ARCH}/${BOARD}`
+- `CMAKE_BINARY_DIR`: The build directory of your application. The build directory doesn't
+  have to match the config file you're working with, as the output in the CMake binary
+  directory is virtually the same in every application. Example:
+  `${workspaceFolder:zephyr}/samples/bluetooth/mesh/build`.
 
-It also always includes the board defconfig file in the parsing: `${workspaceFolder:zephyr}/${BOARD_DIR}/${BOARD}_defconfig`
+The configuration also always includes the board defconfig file in the parsing:
+Add the following entry in the `kconfig.conf_files` array:
+`${workspaceFolder:zephyr}/${BOARD_DIR}/${BOARD}_defconfig`

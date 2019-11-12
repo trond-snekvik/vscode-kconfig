@@ -4,13 +4,13 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as glob from "glob";
+import * as fuzzy from "fuzzysort";
 import { resolveExpression, tokenizeExpression, TokenKind } from './evaluate';
 
 function getConfig(name: string): any {
 	var config = vscode.workspace.getConfiguration("kconfig");
 	return config.get(name);
 }
-
 
 export type ConfigValue = string | number | boolean;
 export type ConfigValueRange = { max: string, min: string, condition?: string };
@@ -44,12 +44,9 @@ export class ConfigLocation {
 		this.menu = [];
 	}
 
-	includeLineInLoc(uri: vscode.Uri, lineNumber: number, line: string) {
-
-		var location = this.locations.find(l => l.uri.fsPath === uri.fsPath && l.range.end.line === lineNumber - 1);
-		if (location) {
-			location.range = new vscode.Range(location.range.start, new vscode.Position(lineNumber, line.length));
-		}
+	includeInLastLoc(uri: vscode.Uri, lineNumber: number, line: string) {
+		var location = this.locations[this.locations.length - 1];
+		location.range = location.range.with({end: new vscode.Position(lineNumber, line.length)});
 	}
 
 	isValidOverride(overrideValue: string): boolean {
@@ -138,7 +135,7 @@ export class ConfigLocation {
 	}
 
 	evaluateSymbol(name: string, all: ConfigLocation[], overrides: ConfigOverride[] = []): ConfigValue {
-		if (name.match(/^\s*(0x[\da-fA-F]+|\d+)\s*$/)) {
+		if (name.match(/^\s*(0x[\da-fA-F]+|[\-+]?\d+)\s*$/)) {
 			return Number(name);
 		} else if (name.match(/^\s*[ynm]\s*$/)) {
 			return name.trim() !== 'n';
@@ -225,23 +222,61 @@ export class ConfigLocation {
 
 type LocationFile = { uri: vscode.Uri, links: vscode.DocumentLink[], entries: { [name: string]: ConfigLocation } };
 
+var env: { [name: string]: string };
+
+function updateEnv() {
+	env = {};
+	var conf = getConfig('env');
+	Object.keys(conf).forEach(k => env[k] = conf[k]);
+
+	try {
+		Object.keys(env).forEach(key => {
+			var match;
+			while ((match = env[key].match(/\${(.+?)}/)) !== null) {
+				var replacement: string;
+				if (match[1] === key) {
+					vscode.window.showErrorMessage(`Kconfig environment is circular: variable ${key} references itself`);
+					throw new Error('Kconfig environment is circular');
+				} else if (match[1] in env) {
+					replacement = env[match[1]];
+				} else if (match[1].startsWith('workspaceFolder')) {
+					if (!vscode.workspace.workspaceFolders) {
+						return;
+					}
+
+					var folder = match[1].match(/workspaceFolder:(.+)/);
+					if (folder) {
+						var wsf = vscode.workspace.workspaceFolders.find(f => f.name === folder![1]);
+						if (!wsf) {
+							return;
+						}
+						replacement = wsf.uri.fsPath;
+					} else {
+						replacement = vscode.workspace.workspaceFolders[0].uri.fsPath;
+					}
+				} else {
+					return;
+				}
+
+				env[key] = env[key].replace(new RegExp(`\\\${${match[1]}}`, 'g'), replacement);
+			}
+		});
+	} catch (e) {
+		// ignore
+	}
+}
 
 function pathReplace(fileName: string): string {
-	var env = getConfig('env') as { [name: string]: string };
-	if (env) {
-		Object.entries(env).forEach(([envVar, replacement]) => {
-			fileName = fileName.replace(`$(${envVar})`, replacement);
-		});
-	}
-
-	fileName = fileName.replace(/\${workspaceFolder:([^}]+)}/g, (original, name) => {
+	fileName = fileName.replace(/\${workspaceFolder:(.+?)}/g, (original, name) => {
 		var folder = vscode.workspace.workspaceFolders!.find(folder => folder.name === name);
 		return folder ? folder.uri.fsPath : original;
 	});
 
-	fileName = fileName.replace(/\${([^}]+)}/g, (original: string, v?: string) => {
-		if (v && v in process.env) {
+	fileName = fileName.replace(/\$[{(](.+?)[})]/g, (original: string, v: string) => {
+		if (v in process.env) {
 			return process.env[v] as string;
+		} else if (v in env) {
+			return env[v];
 		}
 		return original;
 	});
@@ -273,7 +308,7 @@ function resolvePath(fileName: string, root?: string) {
 type Environment = { [variable: string]: string };
 
 function envReplace(text: string, env: Environment) {
-	return text.replace(/\$\(([^)]+)(?:(,[^)]+))?\)/, (original, variable, dflt) => ((variable in env) ? env[variable] : dflt ? dflt : original));
+	return text.replace(/\$\((.+?)\)/, (original, variable) => ((variable in env) ? env[variable] : original));
 }
 
 class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvider, vscode.CompletionItemProvider, vscode.DocumentLinkProvider, vscode.ReferenceProvider, vscode.CodeActionProvider, vscode.DocumentSymbolProvider, vscode.WorkspaceSymbolProvider {
@@ -308,6 +343,7 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 			new vscode.CompletionItem('visible if', vscode.CompletionItemKind.Keyword),
 			new vscode.CompletionItem('default', vscode.CompletionItemKind.Keyword),
 		];
+		this.operatorCompletions.forEach(c => c.commitCharacters = [' ']);
 
 		var range = new vscode.CompletionItem('range', vscode.CompletionItemKind.Keyword);
 		range.insertText = new vscode.SnippetString('range ');
@@ -315,38 +351,41 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 		range.insertText.appendText(' ');
 		range.insertText.appendPlaceholder('max');
 		this.operatorCompletions.push(range);
-		this.operatorCompletions.forEach(c => c.commitCharacters = [' ']);
+
+		var help = new vscode.CompletionItem('help', vscode.CompletionItemKind.Keyword);
+		help.insertText = new vscode.SnippetString('help\n  ');
+		help.insertText.appendTabstop();
+		this.operatorCompletions.push(help);
 
 		this.menus = [];
 		this.actions = {};
 		this.staticConf = [];
-
-		var help = new vscode.CompletionItem('help', vscode.CompletionItemKind.Keyword);
-		help.insertText = new vscode.SnippetString('help \n  ');
-		help.insertText.appendTabstop();
-		this.operatorCompletions.push(help);
 		this.diags = vscode.languages.createDiagnosticCollection('kconfig');
 
-		vscode.workspace.onDidOpenTextDocument(doc => this.scanDoc(doc, false));
+		vscode.workspace.onDidOpenTextDocument(doc => this.scanDoc(doc));
 		vscode.workspace.onDidChangeTextDocument(e => {
-			var file = this.files[e.document.uri.fsPath];
-			if (file) {
-				e.contentChanges.forEach(change => {
-					Object.values(file.entries).forEach(entry => {
-						entry.locations.forEach(loc => {
-							if (loc.uri.fsPath === file.uri.fsPath) {
-								if (loc.range.start.isAfter(change.range.start)) {
-									var lineOffset = change.text.split(/\r?\n/g).length - (change.range.end.line - change.range.start.line)-1;
-									loc.range = new vscode.Range(loc.range.start.translate(lineOffset), loc.range.end.translate(lineOffset));
-								}
-							}
-						});
-					});
-				});
+			if (e.document.languageId === 'kconfig') {
+				this.rescan();
+			} else {
+				this.scanDoc(e.document);
 			}
-			this.scanDoc(e.document, true, false);
 		});
 
+	}
+
+	rescan() {
+		this.entries = {};
+		this.menus = [];
+		this.actions = {};
+		this.staticConf = [];
+		this.files = {};
+		this.entries = {};
+		this.staticConf = [];
+		this.diags.clear();
+		this.actions = {};
+		this.menus = [];
+
+		return this.doScan();
 	}
 
 	doScan(): Promise<string> {
@@ -397,30 +436,58 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 				recursive = true;
 			}
 		}
+
+		const configMatch    = /^\s*(menuconfig|config)\s+([\d\w_]+)/;
+		const choiceMatch    = /^\s*choice(?:\s+([\d\w_]+))?/;
+		const sourceMatch    = /^\s*(source|rsource|osource)\s+"((?:.*?[^\\])?)"/;
+		const ifMatch        = /^\s*if\s+([^#]+)/;
+		const endifMatch     = /^\s*endif\b/;
+		const endMenuMatch   = /^\s*endmenu\b/;
+		const menuMatch      = /^\s*((?:main)?menu)\s+"((?:.*?[^\\])?)"/;
+		const endChoiceMatch = /^\s*endchoice\b/;
+		const depOnMatch     = /^\s*depends\s+on\s+([^#]+)/;
+		const envMatch       = /^\s*([\w\d_\-]+)\s*=\s*([^#]+)/;
+		const typeMatch      = /^\s*(bool|tristate|string|hex|int)(?:\s+"((?:.*?[^\\])?)")?/;
+		const selectMatch    = /^\s*(?:select|imply)\s+([\w\d_]+)(?:\s+if\s+([^#]+))?/;
+		const promptMatch    = /^\s*prompt\s+"((?:.*?[^\\])?)"/;
+		const helpMatch      = /^\s*help\b/;
+		const defaultMatch   = /^\s*default\s+([^#]+)/;
+		const defMatch       = /^\s*def_(bool|tristate|int|hex)\s+([^#]+)/;
+		const defStringMatch = /^\s*def_string\s+"((?:.*?[^\\])?)"(?:\s+if\s+([^#]+))?/;
+		const rangeMatch     = /^\s*range\s+([\-+]?[\w\d_]+)\s+([\-+]?[\w\d_]+)(?:\s+if\s+([^#]+))?/;
+
 		var entry: ConfigLocation | null = null;
 		var help = false;
 		var helpIndent: string | null = null;
 		for (var lineNumber = 0; lineNumber < lines.length; lineNumber++) {
 			var line = envReplace(lines[lineNumber], env);
 
-			if (line.length === 0) {
-				continue;
-			}
+			var startLineNumber = lineNumber;
 
 			/* If lines end with \, the line ending should be ignored: */
 			while (line.endsWith('\\') && lineNumber < lines.length - 1) {
 				line = line.slice(0, line.length - 1) + envReplace(lines[++lineNumber], env);
 			}
 
+			if (line.length === 0) {
+				continue;
+			}
+
+			if (line.match(/^\s*#/)) {
+				continue;
+			}
+
+			var lineRange = new vscode.Range(startLineNumber, 0, lineNumber, line.length);
+
 			if (help) {
-				var indent = line.match(/^\s*/)![0];
+				var indent = line.replace(/\t/g, ' '.repeat(8)).match(/^\s*/)![0];
 				if (helpIndent === null) {
 					helpIndent = indent;
 				}
 				if (indent.startsWith(helpIndent)) {
 					if (entry) {
 						entry.help += ' ' + line.trim();
-						entry.includeLineInLoc(uri, lineNumber, line);
+						entry.includeInLastLoc(uri, lineNumber, line);
 					}
 				} else {
 					help = false;
@@ -435,10 +502,10 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 
 			var location;
 			var name: string;
-			var match = line.match(/^(\s*(?<kind>menuconfig|config)\s+)(?<name>[\d\w_]+)/);
+			var match = line.match(configMatch);
 			if (match) {
-				name = match.groups!['name'];
-				location = new vscode.Location(uri, new vscode.Position(lineNumber, match[1].length));
+				name = match[2];
+				location = new vscode.Location(uri, lineRange);
 				if (name in this.entries) {
 					entry = this.entries[name];
 					file.entries[name] = entry;
@@ -446,7 +513,7 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 						entry.locations.push(location);
 					}
 				} else {
-					entry = new ConfigLocation(name, location, match.groups!['kind'] as ConfigKind);
+					entry = new ConfigLocation(name, location, match[1] as ConfigKind);
 					file.entries[name] = entry;
 					this.entries[name] = entry;
 					entry.menu = Object.assign([], menu);
@@ -465,22 +532,23 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 				}
 				continue;
 			}
-			match = line.match(/^(\s*)choice(?:\s+([\d\w_]+))?/);
+			match = line.match(choiceMatch);
 			if (match) {
-				location = new vscode.Location(uri, new vscode.Position(lineNumber, match[1].length));
-				name = match[2] || `<choice @ ${uri.fsPath}:${lineNumber}>`;
+				location = new vscode.Location(uri, lineRange);
+				name = match[1] || `<choice @ ${uri.fsPath}:${lineNumber}>`;
 				entry = new ConfigLocation(name, location, 'choice');
 				choice = entry;
 				continue;
 			}
-			match = line.match(/^(\s*(source|rsource|osource)\s+)"((?:.*?[^\\])?)"/);
+			match = line.match(sourceMatch);
 			if (match) {
-				var includeFile = resolvePath(match[3], match[2] === 'rsource' ? path.dirname(uri.fsPath) : undefined);
+				var includeFile = resolvePath(match[2], match[1] === 'rsource' ? path.dirname(uri.fsPath) : undefined);
 				if (includeFile) {
 					if (recursive) {
 						var matches = glob.sync(includeFile);
-						var range = new vscode.Range(new vscode.Position(lineNumber, match![1].length + 1),
-														new vscode.Position(lineNumber, match![0].length - 1));
+						var range = new vscode.Range(
+							new vscode.Position(lineNumber, match[1].length + 1),
+							new vscode.Position(lineNumber, match[0].length - 1));
 						matches.forEach(match => {
 							this.scanFile(match, true, recursive, Object.assign({}, env), dependencies, menu); // assign clones the object
 							if (fs.existsSync(match)) {
@@ -493,7 +561,7 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 				}
 				continue;
 			}
-			match = line.match(/^\s*if\s+([^#]+)/);
+			match = line.match(ifMatch);
 			if (match) {
 				var dep = match[1].trim().replace(/\s+/g, ' ');
 				if (!dependencies.includes(dep)) {
@@ -501,54 +569,40 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 				}
 				continue;
 			}
-			match = line.match(/^\s*endif/);
+			match = line.match(endifMatch);
 			if (match) {
 				dependencies.pop();
 				continue;
 			}
-			match = line.match(/^\s*endmenu/);
+			match = line.match(endMenuMatch);
 			if (match) {
 				menu.pop();
 				continue;
 			}
-			match = line.match(/^\s*mainmenu\s+"((?:.*?[^\\])?)"/);
+			match = line.match(menuMatch);
 			if (match) {
 				entry = null;
 				var mainmenu: ConfigMenu = {
-					prompt: match[1],
+					prompt: match[2],
 					dependencies: [],
-					location: new vscode.Location(uri, new vscode.Position(lineNumber, 0)),
-					parents: [],
+					location: new vscode.Location(uri, lineRange),
+					parents: match[1] === 'mainmenu' ? [] : Object.assign([], menu),
 				};
 
 				menu.push(mainmenu);
 				this.menus.push(mainmenu);
 				continue;
 			}
-			match = line.match(/^\s*menu\s+"((?:.*?[^\\])?)"/);
-			if (match) {
-				entry = null;
-				var m: ConfigMenu = {
-					prompt: match[1],
-					dependencies: [],
-					location: new vscode.Location(uri, new vscode.Position(lineNumber, 0)),
-					parents: Object.assign([], menu),
-				};
-
-				menu.push(m);
-				this.menus.push(m);
-				continue;
-			}
-			match = line.match(/^\s*endchoice\b/);
+			match = line.match(endChoiceMatch);
 			if (match) {
 				choice = null;
 				continue;
 			}
-			match = line.match(/^\s*depends\s+on\s+([^#]+)/);
+			match = line.match(depOnMatch);
 			if (match) {
 				var depOn = match[1].trim().replace(/\s+/g, ' ');
 				if (entry) {
-					entry.includeLineInLoc(uri, lineNumber, match[0]);
+					entry.includeInLastLoc(uri, lineNumber, match[0]);
 
 					if (!dependencies.includes(depOn)) {
 						entry.dependencies.push(depOn);
@@ -559,7 +613,7 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 				continue;
 			}
 
-			match = line.match(/^\s*([\w\d_\-]+)\s*=\s*([\w\d_\-]+)$/);
+			match = line.match(envMatch);
 			if (match) {
 				env[match[1]] = match[2];
 				continue;
@@ -569,33 +623,35 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 				continue;
 			}
 
-			entry.includeLineInLoc(uri, lineNumber, line);
-
-			match = line.match(/(bool|tristate|string|hex|int)(?:\s+"((?:.*?[^\\])?)")?/);
+			match = line.match(typeMatch);
 			if (match) {
 				entry.type = match[1] as ConfigValueType;
 				entry.text = match[2];
+				entry.includeInLastLoc(uri, lineNumber, line);
 				continue;
 			}
-			match = line.match(/^\s*select\s+([\w\d_]+)(?:\s+if\s+([^#]+))?/);
+			match = line.match(selectMatch);
 			if (match) {
 				entry.selects.push({name: match[1], condition: match[2]});
+				entry.includeInLastLoc(uri, lineNumber, line);
 				continue;
 			}
+			match = line.match(promptMatch);
 			if (match) {
-				entry.type = match[1];
-				entry.text = match[2];
+				entry.text = match[1];
+				entry.includeInLastLoc(uri, lineNumber, line);
 				continue;
 			}
-			match = line.match(/^\s*help\s*$/);
+			match = line.match(helpMatch);
 			if (match) {
 				help = true;
 				helpIndent = null;
 				entry.help = '';
+				entry.includeInLastLoc(uri, lineNumber, line);
 				continue;
 			}
 			var ifStatement;
-			match = line.match(/^\s*default\s+([^#]+)/);
+			match = line.match(defaultMatch);
 			if (match) {
 				ifStatement = match[1].match(/(.*)if\s+([^#]+)/);
 				if (ifStatement) {
@@ -603,9 +659,10 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 				} else {
 					entry.defaults.push({ value: match[1] });
 				}
+				entry.includeInLastLoc(uri, lineNumber, line);
 				continue;
 			}
-			match = line.match(/^\s*def_(bool|tristate)\s+([^#]+)/);
+			match = line.match(defMatch);
 			if (match) {
 				entry.type = match[1] as ConfigValueType;
 				ifStatement = match[2].match(/(.*)if\s+([^#]+)/);
@@ -614,27 +671,47 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 				} else {
 					entry.defaults.push({ value: match[2] });
 				}
+				entry.includeInLastLoc(uri, lineNumber, line);
 				continue;
 			}
-			match = line.match(/^\s*range\s+([\w\d_]+)\s+([\w\d_]+)(?:\s+if\s+([^#]+))?/);
+			match = line.match(defStringMatch);
+			if (match) {
+				entry.type = 'string';
+				ifStatement = match[1].match(/(.*)if\s+([^#]+)/);
+				if (ifStatement) {
+					entry.defaults.push({ value: ifStatement[1], condition: ifStatement[2] });
+				} else {
+					entry.defaults.push({ value: match[1] });
+				}
+				entry.includeInLastLoc(uri, lineNumber, line);
+				continue;
+			}
+			match = line.match(rangeMatch);
 			if (match) {
 				entry.ranges.push({
 					min: match[1],
 					max: match[2],
 					condition: match[3],
 				});
+				entry.includeInLastLoc(uri, lineNumber, line);
 				continue;
 			}
+
+			if (line.match(/^\s*comment\s+".*"/)) {
+				continue;
+			}
+
+			if (line.match(/^\s*optional/)) {
+				continue;
+			}
+
+			console.log('Unknown line: ' + line);
 		}
 	}
 
-	scanDoc(doc: vscode.TextDocument, reparse: boolean=true, recursive?: boolean, env?: {[variable: string]: string}) {
-		if (doc && doc.uri && doc.uri.scheme === 'file') {
-			if (doc.languageId === 'kconfig') {
-				this.scanText(doc.uri, doc.getText(), reparse, recursive, env);
-			} else if (doc.languageId === 'properties') {
-				this.servePropertiesDiag(doc);
-			}
+	scanDoc(doc: vscode.TextDocument) {
+		if (doc && doc.uri && doc.uri.scheme === 'file' && doc.languageId === 'properties') {
+			this.servePropertiesDiag(doc);
 		}
 	}
 
@@ -703,10 +780,10 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 	}
 
 	parseLine(line: string, diags: vscode.Diagnostic[], lineNumber?: number): ConfigOverride | undefined {
+		var thisLine = lineNumber !== undefined ? new vscode.Position(lineNumber, 0) : undefined;
 		var match = line.match(/^\s*CONFIG_([^\s=]+)\s*(?:=\s*(".*?[^\\]"|""|[ynm]\b|0x[a-fA-F\d]+\b|\d+\b))?/);
 		if (match) {
 			var override;
-			var thisLine = lineNumber !== undefined ? new vscode.Position(lineNumber, 0) : undefined;
 			if (match[2]) {
 				var entry = this.getEntry(match[1]);
 				if (entry) {
@@ -732,6 +809,8 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 			} else if (thisLine !== undefined) {
 				diags.push(new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), 'Missing value for config ' + match[1], vscode.DiagnosticSeverity.Error));
 			}
+		} else if (!line.match(/^\s*(#|$)/) && thisLine) {
+			diags.push(new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), 'Syntax error: All lines must either be comments or config entries with values.', vscode.DiagnosticSeverity.Error));
 		}
 	}
 
@@ -749,6 +828,12 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 					var diag = new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), `Entry ${override!.config.name} is already defined`, vscode.DiagnosticSeverity.Warning);
 					if (duplicate.line !== undefined) {
 						diag.relatedInformation = [{ location: new vscode.Location(doc.uri, new vscode.Position(duplicate.line, 0)), message: 'Previous declaration here' }];
+					} else if (duplicate.value === override.value) {
+						diag.message += ' in static config';
+						diag.tags = [vscode.DiagnosticTag.Unnecessary];
+					} else {
+						diag.message += ` in static config (previous value ${duplicate.value})`;
+						diag.severity = vscode.DiagnosticSeverity.Hint;
 					}
 					diags.push(diag);
 				} else {
@@ -980,74 +1065,95 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 
 	provideCompletionItems(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken, context: vscode.CompletionContext): vscode.ProviderResult<vscode.CompletionItem[] | vscode.CompletionList> {
 		var line = document.lineAt(position.line);
+		var wordRange = document.getWordRangeAtPosition(position);
 
-		var wordBase = document.getText(document.getWordRangeAtPosition(position)).slice(0, position.character).replace(/^CONFIG_/, '');
+		var wordBase = wordRange ? document.getText(wordRange).slice(0, position.character).replace(/^CONFIG_/, '') : '';
 
 		var isProperties = (document.languageId === 'properties');
 		var items: vscode.CompletionItem[];
-		if ((document.languageId === 'kconfig' && line.text.match(/(visible if|depends on|select|default|def_bool|def_tristate)/)) || isProperties) {
-			var entries = this.getAll().filter(e => !(isProperties && e.kind === 'choice') && e.name.startsWith(wordBase));
-			items = entries.slice(0, 500).map(e => {
-				var kinds = {
-					'config': vscode.CompletionItemKind.Variable,
-					'menuconfig': vscode.CompletionItemKind.Class,
-					'choice': vscode.CompletionItemKind.Enum,
-				};
 
-				var item = new vscode.CompletionItem(isProperties ? `CONFIG_${e.name}` : e.name, (e.kind ? kinds[e.kind] : vscode.CompletionItemKind.Text));
-				item.sortText = e.name;
-				item.detail = e.text;
-				if (isProperties) {
-					var lineRange = new vscode.Range(position.line, 0, position.line, 999999);
-					var lineText = document.getText(lineRange);
-					var replaceText = lineText.replace(/\s*#.*$/, '');
-					if (replaceText.length > 0) {
-						item.range = new vscode.Range(position.line, 0, position.line, replaceText.length);
-					}
-
-					item.insertText = new vscode.SnippetString(`${item.label}=`);
-					switch (e.type) {
-						case 'bool':
-							if (e.defaults.length > 0 && e.defaults[0].value === 'y') {
-								item.insertText.appendPlaceholder('n');
-							} else {
-								item.insertText.appendPlaceholder('y');
-							}
-							break;
-						case 'tristate':
-							item.insertText.appendPlaceholder('y');
-							break;
-						case 'int':
-						case 'string':
-							if (e.defaults.length > 0) {
-								item.insertText.appendPlaceholder(e.defaults[0].value);
-							} else {
-								item.insertText.appendTabstop();
-							}
-							break;
-						case 'hex':
-							if (e.defaults.length > 0) {
-								item.insertText.appendPlaceholder(e.defaults[0].value);
-							} else {
-								item.insertText.appendText('0x');
-								item.insertText.appendTabstop();
-							}
-							break;
-						default:
-							break;
-					}
-				}
-				return item;
-			});
-
-			if (!isProperties) {
-				items.push(new vscode.CompletionItem('if', vscode.CompletionItemKind.Keyword));
-			}
-
-			return { isIncomplete: (entries.length > 500), items: items };
-		} else {
+		if (!isProperties && !line.text.match(/(if|depends\s+on|select|default|def_bool|def_tristate|def_int|def_hex|range)/)) {
 			return this.operatorCompletions;
 		}
+
+		const maxCount = 500;
+		var entries: ConfigLocation[];
+		var count: number;
+		if (wordBase.length > 0) {
+			var result = fuzzy.go(wordBase,
+					this.getAll(),
+					{ key: 'name', limit: maxCount, allowTypo: true });
+
+			entries = result.map(r => r.obj);
+			count = result.total;
+		} else {
+			entries = this.getAll();
+			count = entries.length;
+			entries = entries.slice(0, maxCount);
+		}
+
+
+		if (isProperties) {
+			var lineRange = new vscode.Range(position.line, 0, position.line, 999999);
+			var lineText = document.getText(lineRange);
+			var replaceText = lineText.replace(/\s*#.*$/, '');
+		}
+
+		const kinds = {
+			'config': vscode.CompletionItemKind.Variable,
+			'menuconfig': vscode.CompletionItemKind.Class,
+			'choice': vscode.CompletionItemKind.Enum,
+		};
+
+		items = entries.map(e => {
+			var item = new vscode.CompletionItem(isProperties ? `CONFIG_${e.name}` : e.name, (e.kind ? kinds[e.kind] : vscode.CompletionItemKind.Text));
+			item.sortText = e.name;
+			item.detail = e.text;
+			if (isProperties) {
+				if (replaceText.length > 0) {
+					item.range = new vscode.Range(position.line, 0, position.line, replaceText.length);
+				}
+
+				item.insertText = new vscode.SnippetString(`${item.label}=`);
+				switch (e.type) {
+					case 'bool':
+						if (e.defaults.length > 0 && e.defaults[0].value === 'y') {
+							item.insertText.appendPlaceholder('n');
+						} else {
+							item.insertText.appendPlaceholder('y');
+						}
+						break;
+					case 'tristate':
+						item.insertText.appendPlaceholder('y');
+						break;
+					case 'int':
+					case 'string':
+						if (e.defaults.length > 0) {
+							item.insertText.appendPlaceholder(e.defaults[0].value);
+						} else {
+							item.insertText.appendTabstop();
+						}
+						break;
+					case 'hex':
+						if (e.defaults.length > 0) {
+							item.insertText.appendPlaceholder(e.defaults[0].value);
+						} else {
+							item.insertText.appendText('0x');
+							item.insertText.appendTabstop();
+						}
+						break;
+					default:
+						break;
+				}
+			}
+			return item;
+		});
+
+		if (!isProperties) {
+			items.push(new vscode.CompletionItem('if', vscode.CompletionItemKind.Keyword));
+		}
+
+		return { isIncomplete: (count > maxCount), items: items };
 	}
 
 	resolveCompletionItem(item: vscode.CompletionItem, token: vscode.CancellationToken): vscode.ProviderResult<vscode.CompletionItem> {
@@ -1145,64 +1251,56 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 			info.push(m.symbol);
 		});
 
-		entries.forEach(e => {
-			var symbols = e.locations
-				.filter(l => l.uri.fsPath === document.uri.fsPath)
-				.map(l => {
-					return {
-						entry: e,
-						symbol: new vscode.DocumentSymbol(
-							e.name,
-							'',
-							e.symbolKind(),
-							l.range,
-							l.range)
-					};
-				});
+		const symbols = entries
+			.map(e => {
+				var loc = e.locations.find(l => l.uri.fsPath === document.uri.fsPath)!;
+				return {
+					entry: e,
+					symbol: new vscode.DocumentSymbol(
+						e.name,
+						'',
+						e.symbolKind(),
+						loc.range,
+						loc.range)
+				};
+			});
 
-			symbols.forEach(s => {
-				var p;
-				if (s.entry.menu.length > 0) {
-					p = menus.find(menu => s.entry.menu[s.entry.menu.length - 1] === menu.entry);
-					if (p) {
-						p.symbol.children.push(s.symbol);
-						return;
-					}
-				}
-
-				var m = s.entry.dependencies
-					.filter(d => d.match(/^\w+$/))
-					.map(d => symbols.find(s => s.entry.kind === 'menuconfig' && s.entry.name === d))
-					.filter(s => s !== undefined);
-
-				if (m && m.length > 0) {
-					p = m[m.length - 1];
-					p!.symbol.children.push(s.symbol);
+		symbols.forEach(s => {
+			var p;
+			if (s.entry.menu.length > 0) {
+				p = menus.find(menu => s.entry.menu[s.entry.menu.length - 1] === menu.entry);
+				if (p) {
+					p.symbol.children.push(s.symbol);
 					return;
 				}
+			}
 
-				info.push(s.symbol);
-			});
+			var m = s.entry.dependencies
+				.map(d => d.trim())
+				.filter(d => d.match(/^\w+$/))
+				.map(d => symbols.find(s => s.entry.name.startsWith(d)))
+				.filter(s => s !== undefined);
+
+			if (m && m.length > 0) {
+				p = m[m.length - 1];
+				p!.symbol.children.push(s.symbol);
+				return;
+			}
+
+			info.push(s.symbol);
 		});
 
 		return info;
 	}
 
 	provideWorkspaceSymbols(query: string, token: vscode.CancellationToken): vscode.ProviderResult<vscode.SymbolInformation[]> {
-		var entries = this.getAll().filter(e => e.kind && e.name.startsWith(query));
+		var entries = fuzzy.go(query.replace(/^CONFIG_/, ''), this.getAll().filter(e => e.kind), {key: 'name'});
 
-		var info: vscode.SymbolInformation[] = [];
-
-
-		entries.forEach(e => {
-			info = info.concat(e.locations.map(l => new vscode.SymbolInformation(
-				`CONFIG_${e.name}`,
-				e.symbolKind(),
-				e.menu.length > 0 ? e.menu[e.menu.length - 1].prompt : '',
-				l)));
-		});
-
-		return info;
+		return entries.map(result => new vscode.SymbolInformation(
+			result.obj.name,
+			vscode.SymbolKind.Property,
+			result.obj.menu.length > 0 ? result.obj.menu[result.obj.menu.length - 1].prompt : '',
+			result.obj.locations[0]));
 	}
 
 }
@@ -1211,12 +1309,13 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 // your extension is activated the very first time the command is executed
 export async function activate(context: vscode.ExtensionContext) {
 
+	updateEnv();
 	var langHandler = new KconfigLangHandler();
 
 	var status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 10000);
 	context.subscriptions.push(status);
 
-	status.text = ' $(sync~spin) kconfig';
+	status.text = ' $(sync~spin) Kconfig';
 	var root = resolvePath(getConfig('root'));
 	if (root) {
 		status.tooltip = `Starting from ${root}`;
@@ -1224,7 +1323,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	status.show();
 
 	langHandler.doScan().then(result => {
-		status.text = `kconfig complete (${result})`;
+		status.text = `Kconfig complete (${result})`;
 	}).catch(e => {
 		status.text = `$(alert) kconfig failed`;
 		status.tooltip = e;
@@ -1233,6 +1332,14 @@ export async function activate(context: vscode.ExtensionContext) {
 			status.hide();
 			status.dispose();
 		}, 10000);
+	});
+
+
+	vscode.workspace.onDidChangeConfiguration(e => {
+		if (e.affectsConfiguration('kconfig.env')) {
+			updateEnv();
+			langHandler.rescan();
+		}
 	});
 
 

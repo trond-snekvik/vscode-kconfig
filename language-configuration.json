@@ -3,8 +3,7 @@
         "markers": {
             "start": "^\\s*(choice|if|menu)",
             "end": "^\\s*(endchoice|endif|endmenu)"
-        },
-        "offSide": true
+        }
     },
     "comments": {
         "lineComment": "#"

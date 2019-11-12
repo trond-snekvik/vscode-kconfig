@@ -1,13 +1,13 @@
 {
 	"name": "kconfig-lang",
-	"displayName": "kconfig-lang",
-	"description": "Syntax highlighting, linting and intellisense for kconfig",
+	"displayName": "Kconfig",
+	"description": "Syntax highlighting, linting and intellisense for Kconfig",
 	"version": "0.5.0",
 	"publisher": "trond-snekvik",
 	"engines": {
 		"vscode": "^1.37.0"
 	},
-	"icon": "doc/kconfig_icon.png",
+	"icon": "doc/Kconfig_icon.png",
 	"author": {
 		"email": "trond.snekvik@gmail.com",
 		"name": "Trond Einar Snekvik",

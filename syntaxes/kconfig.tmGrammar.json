@@ -36,8 +36,12 @@
             ]
         },
         {
-            "match": "^\\s*(---help---|help)\\b",
-            "captures": {"1": {"name": "keyword.control"}}
+            "begin": "^(\\s*)(---help---|help)\\b",
+            "patterns":[
+                {"include": "#helptext"}
+            ],
+            "end": "^(?!\\1\\s+|$)",
+            "beginCaptures": {"2": {"name": "keyword.control"}}
         },
         {
             "begin": "\\b(option)\\s+(defconfig_list|modules|allnoconfig_y)=?",
@@ -180,6 +184,10 @@
             "patterns":[
                 {"include": "#expression"}
             ]
+        },
+        "helptext": {
+            "begin": "^(\\s+).*",
+            "end": "^(?!\\1)"
         }
     }
 }

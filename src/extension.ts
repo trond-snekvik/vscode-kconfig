@@ -1205,7 +1205,11 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 		if (!entry || !entry.type || !['bool', 'tristate'].includes(entry.type)) {
 			return null;
 		}
-		return this.getAll().filter(e => e.selects.find(s => s.name === entry!.name)).map(e => e.locations[0]);
+		return this.getAll()
+			.filter(e => (
+				e.selects.find(s => s.name === entry!.name) ||
+				e.dependencies.find(d => d.search(new RegExp(`\\b${entry!.name}\\b`)) !== -1)))
+			.map(e => e.locations[0]);
 	}
 
 	provideCodeActions(document: vscode.TextDocument,

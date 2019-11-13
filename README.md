@@ -20,7 +20,7 @@ Adds support for the Kconfig language:
 - Follow `source` links
 - Resolves environment replacements
 - [Breadcrumbs](https://code.visualstudio.com/docs/editor/editingevolved#_breadcrumbs) navigation
-- Find `select` symbols
+- Find all references
 
 ## Configuration file features
 

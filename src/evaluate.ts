@@ -1,4 +1,4 @@
-import { ConfigLocation, ConfigValue, ConfigValueType, ConfigOverride } from "./extension";
+import { Config, ConfigValue, ConfigValueType, ConfigOverride } from "./kconfig";
 import { AssertionError } from "assert";
 
 export enum TokenKind {
@@ -65,8 +65,85 @@ function operatorFromToken(t: Token): Operator {
 	}
 }
 
+function typecheck(op: string, val: ConfigValue, ...types: string[]): ConfigValue {
+	if (!types.includes(typeof val)) {
+		throw new ExpressionError(`Invalid type for ${op} operator: ${typeof val}`);
+	}
+	return val;
+}
 
-export interface Expression { operator: Operator; operands: Expression[]; var?: Token; }
+export class Expression {
+	operator: Operator;
+	operands: Expression[];
+	var?: Token;
+
+	constructor(operator: Operator, operands: Expression[], v?: Token) {
+		this.operator = operator;
+		this.operands = operands;
+		this.var = v;
+	}
+
+	solve(all: Config[], overrides: ConfigOverride[]): ConfigValue {
+		var lhs, rhs;
+
+		switch (this.operator) {
+			case Operator.VAR:
+				lhs = all.find(v => this.var!.value === v.name);
+				if (!lhs) {
+					return false;
+				}
+				return lhs.evaluate(all, overrides);
+			case Operator.LITERAL:
+				if (!this.var) {
+					throw new ExpressionError('Parser error');
+				}
+				if (this.var.kind === TokenKind.STRING) {
+					return this.var.value;
+				}
+				if (this.var.kind === TokenKind.NUMBER) {
+					return Number(this.var.value);
+				}
+				if (this.var.kind === TokenKind.TRISTATE) {
+					return this.var.value === 'y' || this.var.value === 'm';
+				}
+				throw new ExpressionError('Unknown literal', this.var);
+			case Operator.NOT:
+				return !typecheck('!', this.operands[0].solve(all, overrides), 'boolean');
+			case Operator.AND:
+				return typecheck('&&', this.operands[0].solve(all, overrides), 'boolean') && typecheck('&&', this.operands[1].solve(all, overrides), 'boolean');
+			case Operator.OR:
+				return typecheck('||', this.operands[0].solve(all, overrides), 'boolean') || typecheck('||', this.operands[1].solve(all, overrides), 'boolean');
+			case Operator.PARENTHESIS:
+				return this.operands[0].solve(all, overrides);
+			case Operator.EQUAL:
+				lhs = this.operands[0].solve(all, overrides);
+				rhs = this.operands[1].solve(all, overrides);
+				return (lhs === rhs);
+			case Operator.NEQUAL:
+				lhs = this.operands[0].solve(all, overrides);
+				rhs = this.operands[1].solve(all, overrides);
+				return (lhs !== rhs);
+			case Operator.GREATER:
+				lhs = this.operands[0].solve(all, overrides);
+				rhs = this.operands[1].solve(all, overrides);
+				return (lhs > rhs);
+			case Operator.LESS:
+				lhs = this.operands[0].solve(all, overrides);
+				rhs = this.operands[1].solve(all, overrides);
+				return (lhs < rhs);
+			case Operator.GREATER_EQUAL:
+				lhs = this.operands[0].solve(all, overrides);
+				rhs = this.operands[1].solve(all, overrides);
+				return (lhs >= rhs);
+			case Operator.LESS_EQUAL:
+				lhs = this.operands[0].solve(all, overrides);
+				rhs = this.operands[1].solve(all, overrides);
+				return (lhs <= rhs);
+		}
+
+		throw new ExpressionError('Invalid expression');
+	}
+}
 
 export function tokenizeExpression(expr: string): Token[] {
 	var tokens: Token[] = [];
@@ -137,7 +214,7 @@ export function tokenizeExpression(expr: string): Token[] {
 	return tokens;
 }
 
-export function makeExpr(tokens: Token[]): Expression {
+function makeExpr(tokens: Token[]): Expression {
 	// Tokens in order of precendence:
 	var tokenOrder = [
 		TokenKind.VAR, TokenKind.STRING, TokenKind.NUMBER, TokenKind.TRISTATE,
@@ -178,15 +255,15 @@ export function makeExpr(tokens: Token[]): Expression {
 
 	if (best === undefined) {
 		// the expression is surrounded by parentheses:
-		return { operator: Operator.PARENTHESIS, operands: [makeExpr(tokens.slice(1, tokens.length - 1))] };
+		return new Expression(Operator.PARENTHESIS, [makeExpr(tokens.slice(1, tokens.length - 1))]);
 	}
 
 	if (best.token.kind === TokenKind.VAR) {
-		return { operator: Operator.VAR, operands: [], var: best.token };
+		return new Expression(Operator.VAR, [], best.token);
 	}
 
 	if ([TokenKind.STRING, TokenKind.NUMBER, TokenKind.TRISTATE].includes(best.token.kind)) {
-		return { operator: Operator.LITERAL, operands: [], var: best.token };
+		return new Expression(Operator.LITERAL, [], best.token);
 	}
 
 	var groups: Token[][] = [];
@@ -221,82 +298,24 @@ export function makeExpr(tokens: Token[]): Expression {
 
 	var operands: Expression[] = groups.map(g => makeExpr(g));
 
-	return { operator: op, operands: operands };
+	return new Expression(op, operands);
 }
 
-export function resolveExpression(raw: string, all: ConfigLocation[], overrides: ConfigOverride[]): ConfigValue {
-
+export function resolveExpression(raw: string, all: Config[], overrides: ConfigOverride[]): ConfigValue {
 	var tokens = tokenizeExpression(raw);
 	var expr = makeExpr(tokens);
 
-	var solve = function (expr: Expression): ConfigValue {
-
-		var typecheck = (op: string, val: ConfigValue, ...types: string[]) => {
-			if (!types.includes(typeof val)) {
-				throw new ExpressionError(`Invalid type for ${op} operator: ${typeof val}`);
-			}
-			return val;
-		};
-
-		var lhs, rhs;
-
-		switch (expr.operator) {
-			case Operator.VAR:
-				lhs = all.find(v => expr.var!.value === v.name);
-				if (!lhs) {
-					return false;
-				}
-				return lhs.evaluate(all, overrides);
-			case Operator.LITERAL:
-				if (!expr.var) {
-					throw new ExpressionError('Parser error');
-				}
-				if (expr.var.kind === TokenKind.STRING) {
-					return expr.var.value;
-				}
-				if (expr.var.kind === TokenKind.NUMBER) {
-					return Number(expr.var.value);
-				}
-				if (expr.var.kind === TokenKind.TRISTATE) {
-					return expr.var.value === 'y' || expr.var.value === 'm';
-				}
-				throw new ExpressionError('Unknown literal', expr.var);
-			case Operator.NOT:
-				return !typecheck('!', solve(expr.operands[0]), 'boolean');
-			case Operator.AND:
-				return typecheck('&&', solve(expr.operands[0]), 'boolean') && typecheck('&&', solve(expr.operands[1]), 'boolean');
-			case Operator.OR:
-				return typecheck('||', solve(expr.operands[0]), 'boolean') || typecheck('||', solve(expr.operands[1]), 'boolean');
-			case Operator.PARENTHESIS:
-				return solve(expr.operands[0]);
-			case Operator.EQUAL:
-				lhs = solve(expr.operands[0]);
-				rhs = solve(expr.operands[1]);
-				return (lhs === rhs);
-			case Operator.NEQUAL:
-				lhs = solve(expr.operands[0]);
-				rhs = solve(expr.operands[1]);
-				return (lhs !== rhs);
-			case Operator.GREATER:
-				lhs = solve(expr.operands[0]);
-				rhs = solve(expr.operands[1]);
-				return (lhs > rhs);
-			case Operator.LESS:
-				lhs = solve(expr.operands[0]);
-				rhs = solve(expr.operands[1]);
-				return (lhs < rhs);
-			case Operator.GREATER_EQUAL:
-				lhs = solve(expr.operands[0]);
-				rhs = solve(expr.operands[1]);
-				return (lhs >= rhs);
-			case Operator.LESS_EQUAL:
-				lhs = solve(expr.operands[0]);
-				rhs = solve(expr.operands[1]);
-				return (lhs <= rhs);
-		}
-		throw new ExpressionError('Invalid expression');
-	};
-
-	return solve(expr);
+	return expr.solve(all, overrides);
 }
 
+export function createExpression(raw: string): Expression | undefined {
+	if (!raw) {
+		return undefined;
+	}
+
+	try {
+		return makeExpr(tokenizeExpression(raw));
+	} catch (e) {
+		return new Expression(Operator.LITERAL, [], {kind: TokenKind.TRISTATE, value: 'n'});
+	}
+}

@@ -13,7 +13,7 @@
 		"name": "Trond Einar Snekvik",
 		"url": "https://github.com/trond-snekvik"
 	},
-	"extensionKind": "workspace",
+	"extensionKind": ["workspace"],
 	"license": "MIT",
 	"categories": [
 		"Programming Languages",
@@ -104,7 +104,7 @@
 		"@types/mocha": "^2.2.42",
 		"@types/node": "^10.12.21",
 		"tslint": "^5.12.1",
-		"typescript": "^3.3.1",
+		"typescript": "^3.7.3",
 		"vscode": "^1.1.28"
 	},
 	"dependencies": {

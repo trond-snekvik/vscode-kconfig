@@ -363,7 +363,7 @@ export class Config {
 				return vscode.SymbolKind.Class;
 			case "config":
 				switch (this.type) {
-					case "bool": return vscode.SymbolKind.Boolean;
+					case "bool": return vscode.SymbolKind.Property;
 					case "tristate": return vscode.SymbolKind.EnumMember;
 					case "int": return vscode.SymbolKind.Number;
 					case "hex": return vscode.SymbolKind.Number;

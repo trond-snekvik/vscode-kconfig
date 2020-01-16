@@ -3,19 +3,25 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as fuzzy from "fuzzysort";
-import { resolveExpression, tokenizeExpression, TokenKind } from './evaluate';
-import { Config, ConfigOverride, ConfigEntry, Repository } from "./kconfig";
+import { Operator } from './evaluate';
+import { Config, ConfigOverride, ConfigEntry, Repository, IfScope } from "./kconfig";
 import * as kEnv from './env';
+import { PropFile } from './propfile';
 
-type LocationFile = { uri: vscode.Uri, links: vscode.DocumentLink[], entries: { [name: string]: Config } };
-type ConfFile = { actions: vscode.CodeAction[], diags: vscode.Diagnostic[], conf: ConfigOverride[] };
-class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvider, vscode.CompletionItemProvider, vscode.DocumentLinkProvider, vscode.ReferenceProvider, vscode.CodeActionProvider, vscode.DocumentSymbolProvider, vscode.WorkspaceSymbolProvider {
-
+class KconfigLangHandler
+	implements
+		vscode.DefinitionProvider,
+		vscode.HoverProvider,
+		vscode.CompletionItemProvider,
+		vscode.DocumentLinkProvider,
+		vscode.ReferenceProvider,
+		vscode.CodeActionProvider,
+		vscode.DocumentSymbolProvider,
+		vscode.WorkspaceSymbolProvider {
 	staticConf: ConfigOverride[];
 	diags: vscode.DiagnosticCollection;
-	actions: { [uri: string]: vscode.CodeAction[] };
 	fileDiags: {[uri: string]: vscode.Diagnostic[]};
-	confContexts: { [uri: string]: ConfFile };
+	propFiles: { [uri: string]: PropFile };
 	operatorCompletions: vscode.CompletionItem[];
 	repo: Repository;
 
@@ -53,24 +59,25 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 		help.insertText.appendTabstop();
 		this.operatorCompletions.push(help);
 
-		this.actions = {};
 		this.fileDiags = {};
-		this.confContexts = {};
+		this.propFiles = {};
 		this.staticConf = [];
 		this.diags = vscode.languages.createDiagnosticCollection('kconfig');
 		this.repo = new Repository();
 
-		vscode.workspace.onDidChangeTextDocument(e => {
+		vscode.workspace.onDidChangeTextDocument(async e => {
 			if (e.document.languageId === 'kconfig') {
 				this.repo.onDidChange(e);
 			} else if (e.document.languageId === 'properties') {
-				this.servePropertiesDiag(e.document);
+				var file = this.propFile(e.document.uri);
+				file.onChange(e);
 			}
 		});
 
 		vscode.workspace.onDidSaveTextDocument(d => {
 			if (d.languageId === 'properties') {
-				this.confFileAnalyze(d);
+				var file = this.propFile(d.uri);
+				file.onSave(d);
 			}
 		});
 
@@ -83,19 +90,25 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 				// });
 				// this.diags.set(d.uri, diags);
 			} else if (d.languageId === 'properties') {
-				this.servePropertiesDiag(d);
-				this.confFileAnalyze(d);
+				this.propFile(d.uri).onOpen(d);
+
 			}
 		});
 
 	}
 
+	propFile(uri: vscode.Uri): PropFile {
+		if (!(uri.fsPath in this.propFiles)) {
+			this.propFiles[uri.fsPath] = new PropFile(uri, this.repo, this.loadConfOptions(), this.diags);
+		}
+
+		return this.propFiles[uri.fsPath];
+	}
+
 	rescan() {
-		this.actions = {};
 		this.staticConf = [];
 		this.staticConf = [];
 		this.diags.clear();
-		this.actions = {};
 
 		return this.doScan();
 	}
@@ -114,12 +127,11 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 		vscode.window.visibleTextEditors
 			.filter(e => e.document.languageId === 'properties')
 			.forEach(e => {
-				this.servePropertiesDiag(e.document);
-				this.confFileAnalyze(e.document);
+				this.propFile(e.document.uri).onOpen(e.document);
 			});
 
-		var time_ms = (hrTime[0] * 1000 + hrTime[1] / 1000000);
-		return Promise.resolve(`${Object.keys(this.repo.configs).length} entries, ${(time_ms).toFixed(2)} ms`);
+		var time_ms = Math.round(hrTime[0] * 1000 + hrTime[1] / 1000000);
+		return Promise.resolve(`${Object.keys(this.repo.configs).length} entries, ${time_ms} ms`);
 	}
 
 	loadConfOptions(): ConfigOverride[] {
@@ -155,272 +167,14 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 					}
 					return;
 				}
-				var lines = text.split(/\r?\n/g);
-				lines.forEach(line => {
-					var e = this.parseLine(line, []);
-					if (e) {
-						entries.push(e);
-					}
-				});
+
+				var file = new PropFile(vscode.Uri.file(f), this.repo, [], this.diags);
+				file.parse(text);
+				entries.push(...file.conf);
 			});
 		}
 
 		return entries;
-	}
-
-	parseLine(line: string, diags: vscode.Diagnostic[], lineNumber?: number): ConfigOverride | undefined {
-		var thisLine = lineNumber !== undefined ? new vscode.Position(lineNumber, 0) : undefined;
-		var match = line.match(/^\s*CONFIG_([^\s=]+)\s*(?:=\s*(".*?[^\\]"|""|[ynm]\b|0x[a-fA-F\d]+\b|\d+\b))?/);
-		if (match) {
-			var override;
-			if (match[2]) {
-				var entry = this.repo.configs[match[1]];
-				if (entry) {
-					if (entry.isValidOverride(match[2])) {
-						override = { config: entry, value: match[2], line: lineNumber };
-					} else if (thisLine !== undefined) {
-						diags.push(new vscode.Diagnostic(new vscode.Range(thisLine, thisLine),
-							`Invalid value. Entry ${match[1]} is ${entry.type}.`,
-							vscode.DiagnosticSeverity.Error));
-					}
-				} else if (thisLine !== undefined) {
-					diags.push(new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), 'Unknown entry ' + match[1], vscode.DiagnosticSeverity.Error));
-				}
-
-				var trailing = line.slice(match[0].length).match(/^\s*([^#\s]+[^#]*)/);
-				if (trailing && thisLine !== undefined) {
-					var start = match[0].length + trailing[0].indexOf(trailing[1]);
-					diags.push(new vscode.Diagnostic(new vscode.Range(thisLine.line, start, thisLine.line, start + trailing[1].trimRight().length),
-						'Unexpected trailing characters',
-						vscode.DiagnosticSeverity.Error));
-				}
-				return override;
-			} else if (thisLine !== undefined) {
-				diags.push(new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), 'Missing value for config ' + match[1], vscode.DiagnosticSeverity.Error));
-			}
-		} else if (!line.match(/^\s*(#|$)/) && thisLine) {
-			diags.push(new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), 'Syntax error: All lines must either be comments or config entries with values.', vscode.DiagnosticSeverity.Error));
-		}
-	}
-
-	async confFileAnalyze(doc: vscode.TextDocument) {
-		var ctx = this.confContexts[doc.uri.fsPath];
-		if (!ctx) {
-			return;
-		}
-
-		var all = Object.values(this.repo.configs);
-
-		var addRedundancyAction = (c: ConfigOverride, diag: vscode.Diagnostic) => {
-			var action = new vscode.CodeAction(`Remove redundant entry CONFIG_${c.config.name}`, vscode.CodeActionKind.Refactor);
-			action.edit = new vscode.WorkspaceEdit();
-			action.edit.delete(doc.uri, new vscode.Range(c.line!, 0, c.line! + 1, 0));
-			action.diagnostics = [diag];
-			action.isPreferred = true;
-			ctx.actions.push(action);
-		};
-
-		ctx.conf.forEach((c, i) => {
-			if (c.line === undefined) {
-				return;
-			}
-
-			var override = c.config.resolveValueString(c.value);
-			var line = new vscode.Range(c.line, 0, c.line, 99999999);
-			var diag: vscode.Diagnostic;
-			var action: vscode.CodeAction;
-
-			if (!c.config.text) {
-				diag = new vscode.Diagnostic(line,
-					`Entry ${c.config.name} has no effect (has no prompt)`,
-					vscode.DiagnosticSeverity.Warning);
-				ctx.diags.push(diag);
-				addRedundancyAction(c, diag);
-
-				// Find all selectors:
-				var selectors = all.filter(e => e.selects.find(s => s.name === c.config.name && (!s.condition || s.condition.solve(all, ctx.conf))));
-				ctx.actions.push(...selectors.map(s => {
-					var action = new vscode.CodeAction(`Replace with CONFIG_${s.name}`, vscode.CodeActionKind.QuickFix);
-					action.edit = new vscode.WorkspaceEdit();
-					action.edit.replace(doc.uri, line, `CONFIG_${s.name}=y`);
-					action.diagnostics = [diag];
-					return action;
-				}));
-			}
-
-			if (c.config.type && ['int', 'hex'].includes(c.config.type)) {
-				var range = c.config.getRange(all, ctx.conf);
-				if ((range.min !== undefined && override < range.min) || (range.max !== undefined && override > range.max)) {
-					ctx.diags.push(new vscode.Diagnostic(line,
-						`Entry ${c.value} outside range \`${range.min}\`-\`${range.max}\``,
-						vscode.DiagnosticSeverity.Error));
-				}
-			}
-
-			// tslint:disable-next-line: triple-equals
-			if (override == c.config.defaultValue(all, ctx.conf)) {
-				diag = new vscode.Diagnostic(line,
-					`Entry ${c.config.name} is redundant (same as default)`,
-					vscode.DiagnosticSeverity.Hint);
-				diag.tags = [vscode.DiagnosticTag.Unnecessary];
-				ctx.diags.push(diag);
-
-				addRedundancyAction(c, diag);
-			}
-
-			var missingDependency = c.config.missingDependency(all, ctx.conf);
-			if (missingDependency) {
-				if (c.value === 'n') {
-					diag = new vscode.Diagnostic(line,
-						`Entry is already disabled by dependency: ${missingDependency}`,
-						vscode.DiagnosticSeverity.Warning);
-					diag.tags = [vscode.DiagnosticTag.Unnecessary];
-
-					addRedundancyAction(c, diag);
-				} else {
-					diag = new vscode.Diagnostic(line,
-						`Entry ${c.config.name} dependency ${missingDependency} missing.`,
-						vscode.DiagnosticSeverity.Warning);
-				}
-
-				var tokens = tokenizeExpression(missingDependency);
-				var variables = tokens
-					.filter(t => t.kind === TokenKind.VAR)
-					.map(t => this.repo.configs[t.value])
-					.filter(e => (e && e.text && e.type && ['bool', 'tristate'].includes(e.type)));
-
-				/* Unless the expression is too complex, try all combinations to find one that works: */
-				if (variables.length > 0 && variables.length < 4) {
-					for (var code = 0; code < (1 << variables.length); code++) {
-						var overrides: ConfigOverride[] = variables.map((v, i) => { return { config: v!, value: (code & (1 << i)) ? 'y' : 'n' }; });
-						if (resolveExpression(missingDependency, all, overrides.concat(ctx.conf))) {
-							var newEntries: ConfigOverride[] = [];
-							var existingEntries: ConfigOverride[] = [];
-							overrides.forEach(o => {
-								var dup = ctx.conf.find(c => o.config.name === c.config.name);
-								if (dup && dup.line !== undefined) {
-									if (dup.value !== o.value) {
-										existingEntries.push({config: dup.config, value: o.value, line: dup.line});
-									}
-								} else {
-									newEntries.push(o);
-								}
-							});
-
-							var totLen = newEntries.length + existingEntries.length;
-							if (totLen === 0) {
-								continue;
-							}
-
-							action = new vscode.CodeAction(`Add ${totLen} missing ${totLen > 1 ? 'dependencies' : 'dependency'}`, vscode.CodeActionKind.Refactor);
-							action.edit = new vscode.WorkspaceEdit();
-							if (newEntries.length) {
-								action.edit.insert(doc.uri,
-									new vscode.Position(c.line, 0),
-									newEntries.map(c => `CONFIG_${c.config.name}=${c.value}\n`).join(''));
-							}
-							if (existingEntries.length) {
-								existingEntries.forEach(e => {
-									action.edit!.replace(doc.uri,
-										new vscode.Range(e.line!, 0, e.line!, 999999),
-										`CONFIG_${e.config.name}=${e.value}`);
-								});
-							}
-							action.isPreferred = true;
-							action.diagnostics = [diag];
-							ctx.actions.push(action);
-							break;
-						}
-					}
-				}
-				ctx.diags.push(diag);
-				return;
-			}
-
-			var selector = c.config.selector(all, ctx.conf.filter((_, index) => index !== i));
-			if (selector) {
-				diag = new vscode.Diagnostic(line,
-					`Entry ${c.config.name} is ${c.value === 'n' ? 'ignored' : 'redundant'} (Already selected by ${(selector instanceof Config) ? selector.name : selector.config.name})`,
-					c.value === 'n' ? vscode.DiagnosticSeverity.Warning : vscode.DiagnosticSeverity.Hint);
-				if (selector instanceof Config) {
-					diag.relatedInformation = [new vscode.DiagnosticRelatedInformation(selector.entries[0].loc, `Selected by ${selector.name}`)];
-				} else if (selector.line !== undefined) {
-					diag.relatedInformation = [new vscode.DiagnosticRelatedInformation(new vscode.Location(doc.uri, new vscode.Position(selector.line, 0)), `Selected by CONFIG_${selector.config.name}=${selector.value}`)];
-				}
-				diag.tags = [vscode.DiagnosticTag.Unnecessary];
-				ctx.diags.push(diag);
-				addRedundancyAction(c, diag);
-				return;
-			}
-
-			var actualValue = c.config.evaluate(all, ctx.conf);
-			if (override !== actualValue) {
-				ctx.diags.push(new vscode.Diagnostic(line,
-					`Entry ${c.config.name} assigned value ${c.value}, but evaluated to ${c.config.toValueString(actualValue)}`,
-					vscode.DiagnosticSeverity.Warning));
-				return;
-			}
-		});
-
-		this.diagsAdd(doc.uri, []);
-	}
-
-	confFileCtx(uri: vscode.Uri): ConfFile {
-		if (!(uri.fsPath in this.confContexts)) {
-			this.confContexts[uri.fsPath] = {actions: [], diags: [], conf: []};
-		}
-
-		return this.confContexts[uri.fsPath];
-	}
-
-	servePropertiesDiag(doc: vscode.TextDocument) {
-		var ctx = this.confFileCtx(doc.uri);
-		var text = doc.getText();
-		var lines = text.split(/\r?\n/g);
-		var diags: vscode.Diagnostic[] = [];
-		ctx.conf = this.loadConfOptions();
-		lines.forEach((line, lineNumber) => {
-			var override = this.parseLine(line, diags, lineNumber);
-			if (override) {
-				var duplicate = ctx.conf.find(c => c.config === override!.config);
-				if (duplicate) {
-					var thisLine = new vscode.Position(lineNumber, 0);
-					var diag = new vscode.Diagnostic(new vscode.Range(thisLine, thisLine), `Entry ${override!.config.name} is already defined`, vscode.DiagnosticSeverity.Warning);
-					if (duplicate.line !== undefined) {
-						diag.relatedInformation = [{ location: new vscode.Location(doc.uri, new vscode.Position(duplicate.line, 0)), message: 'Previous declaration here' }];
-					} else if (duplicate.value === override.value) {
-						diag.message += ' in static config';
-						diag.tags = [vscode.DiagnosticTag.Unnecessary];
-					} else {
-						diag.message += ` in static config (previous value ${duplicate.value})`;
-						diag.severity = vscode.DiagnosticSeverity.Hint;
-					}
-					diags.push(diag);
-				} else {
-					ctx.conf.push(override);
-				}
-			}
-		});
-
-		this.diagsReplace(doc.uri, diags);
-
-		// Analysis is done asynchronously to avoid blocking the code completion handler:
-		// process.nextTick(() => this.confFileAnalyze(doc, configurations, diags));
-		// this.confFileAnalyze(doc, configurations, diags);
-	}
-
-	diagsReplace(uri: vscode.Uri, diags: vscode.Diagnostic[]) {
-		this.confContexts[uri.fsPath].diags = diags;
-		this.diags.set(uri, this.confContexts[uri.fsPath].diags);
-	}
-
-	diagsAdd(uri: vscode.Uri, diags: vscode.Diagnostic[]) {
-		if (uri.fsPath in this.confContexts) {
-			this.confContexts[uri.fsPath].diags.push(...diags);
-		} else {
-			this.confContexts[uri.fsPath] = {actions: [], conf: [], diags: diags};
-		}
-		this.diags.set(uri, this.confContexts[uri.fsPath].diags);
 	}
 
 	getSymbolName(document: vscode.TextDocument, position: vscode.Position) {
@@ -619,8 +373,8 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 		range: vscode.Range | vscode.Selection,
 		context: vscode.CodeActionContext,
 		token: vscode.CancellationToken): vscode.ProviderResult<vscode.CodeAction[]> {
-		if (document.uri.fsPath in this.actions) {
-			return this.actions[document.uri.fsPath].filter(a => a.diagnostics![0].range.intersection(range));
+		if (document.uri.fsPath in this.propFiles) {
+			return this.propFiles[document.uri.fsPath].actions.filter(a => a.diagnostics?.[0].range.intersection(range));
 		}
 	}
 
@@ -659,14 +413,23 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 			while (scope && scope.id !== rootParent?.id) {
 				symbol = scopes[scope.id];
 				if (!symbol) {
-					symbol = new vscode.DocumentSymbol(scope.name, '',
+					var name: string = scope.name;
+					if ((scope instanceof IfScope) && (scope.expr?.operator === Operator.VAR)) {
+						name = this.repo.configs[scope.expr.var!.value].text || scope.name;
+					}
+
+					symbol = new vscode.DocumentSymbol(name, '',
 						scope.symbolKind,
 						scope.range,
 						new vscode.Range(scope.lines.start, 0, scope.lines.start, 9999));
 					scopes[scope.id] = symbol;
 				}
 
-				if (!symbol.children.includes(child)) {
+				var existing = symbol.children.find(c => c.name === child.name);
+				if (existing) {
+					existing.children.push(...child.children.filter(c => !existing!.children.includes(c)));
+					existing.range = existing.range.union(child.range);
+				} else {
 					symbol.children.push(child);
 				}
 
@@ -675,7 +438,7 @@ class KconfigLangHandler implements vscode.DefinitionProvider, vscode.HoverProvi
 			}
 
 			if (!topLevelSymbols.includes(child)) {
-				topLevelSymbols.push(symbol);
+				topLevelSymbols.push(child);
 			}
 		});
 		} catch (e) {

@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as glob from "glob";
-import * as fs from 'fs';
 import { Repository, Scope, Config, ConfigValueType, ConfigEntry, ConfigKind, IfScope, MenuScope, ChoiceScope } from "./kconfig";
 import * as kEnv from './env';
 import { createExpression } from './evaluate';
@@ -117,17 +116,10 @@ export class ParsedFile {
 	}
 
 	parse(recursive=true) {
-		var buf = fs.readFileSync(this.uri.fsPath, {encoding: 'utf-8', flag: 'r'});
-		if (!buf) {
-			this.reset();
-			this.diags = [new vscode.Diagnostic(new vscode.Range(0, 0, 0, 0), "Couldn't open file", vscode.DiagnosticSeverity.Error)];
-			return;
-		}
-
-		this.parseRaw(buf);
+		this.parseRaw(kEnv.readFile(this.uri));
 
 		if (recursive) {
-			this.inclusions.forEach(i => i.file.parse());
+			this.inclusions.forEach(i => i.file.parse(recursive));
 		}
 	}
 
@@ -233,13 +225,17 @@ export class ParsedFile {
 			if (match) {
 				var includeFile = kEnv.resolvePath(match[2], match[1] === 'rsource' ? path.dirname(this.uri.fsPath) : undefined);
 				if (includeFile) {
-					var matches = glob.sync(includeFile);
 					var range = new vscode.Range(
 						new vscode.Position(lineNumber, match[1].length + 1),
 						new vscode.Position(lineNumber, match[0].length - 1));
-					matches.forEach(match => {
-						this.inclusions.push({range: range, file: new ParsedFile(this.repo, vscode.Uri.file(match), env, scope, this)});
-					});
+					if (includeFile.scheme === 'file') {
+						var matches = glob.sync(includeFile.fsPath);
+						matches.forEach(match => {
+							this.inclusions.push({range: range, file: new ParsedFile(this.repo, vscode.Uri.file(match), env, scope, this)});
+						});
+					} else {
+						this.inclusions.push({range: range, file: new ParsedFile(this.repo, includeFile, env, scope, this)});
+					}
 				}
 				continue;
 			}

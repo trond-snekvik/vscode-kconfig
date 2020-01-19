@@ -1,9 +1,20 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
+import * as zephyr from './zephyr';
+
+var config = vscode.workspace.getConfiguration("kconfig");
 
 export function getConfig(name: string): any {
-	var config = vscode.workspace.getConfiguration("kconfig");
-	return config.get(name);
+	var conf = config.get(name);
+
+	if (conf !== undefined && zephyr.isZephyr()) {
+		var value = zephyr.getConfig(name);
+		if (value !== undefined) {
+			return value;
+		}
+	}
+	return conf;
 }
 
 
@@ -81,13 +92,18 @@ export function getRoot(file?: string): string {
 	}
 }
 
-export function resolvePath(fileName: string, root?: string) {
+export function resolvePath(fileName: string, root?: string): vscode.Uri {
 	if (!root) {
 		root = getRoot(fileName);
 	}
 	fileName = fileName.replace('${workspaceFolder}', root);
 	fileName = pathReplace(fileName);
-	return path.normalize(path.isAbsolute(fileName) ? fileName : path.join(root ? root : root, fileName));
+	if (fileName.match(/^\w{2,}:\//)) {
+		return vscode.Uri.parse(fileName);
+	}
+
+	// Relying on the uri accepting files without schemes:
+	return vscode.Uri.file(path.normalize(path.isAbsolute(fileName) ? fileName : path.join(root ? root : root, fileName)));
 }
 
 export type Environment = { [variable: string]: string };
@@ -95,3 +111,21 @@ export type Environment = { [variable: string]: string };
 export function replace(text: string, env: Environment) {
 	return text.replace(/\$\((.+?)\)/, (original, variable) => ((variable in env) ? env[variable] : original));
 }
+
+var filemap: {[scheme: string]: (uri: vscode.Uri) => string} = {};
+
+export function readFile(uri: vscode.Uri): string {
+	if (uri.scheme in filemap) {
+		return filemap[uri.scheme](uri);
+	}
+
+	console.error(`Unknown file ${uri.toString()}`);
+
+	return '';
+}
+
+export function registerFileProvider(scheme: string, cb: (uri: vscode.Uri) => string) {
+	filemap[scheme] = cb;
+}
+
+registerFileProvider('file', (uri: vscode.Uri) => fs.readFileSync(uri.fsPath, {encoding: 'utf-8'}));

@@ -97,13 +97,25 @@ export class PropFile {
 	}
 
 	parse(text: string) {
+		this.parseDiags = [];
+		this.conf = [];
+
 		var lines = text.split(/\r?\n/g);
 
 		this.conf = lines.map((l, i) => this.parseLine(l, i)).filter(c => c !== undefined) as ConfigOverride[];
 		this.updateDiags();
 	}
 
+	reparse(d: vscode.TextDocument) {
+		this.parse(d.getText());
+		this.lint();
+	}
+
 	lint() {
+		if (this.timeout) {
+			clearTimeout(this.timeout);
+		}
+
 		this.lintDiags = [];
 		this.actions = [];
 
@@ -299,20 +311,15 @@ export class PropFile {
 				diag.range.end.character
 			);
 		});
-
-		this.parseDiags = [];
-		this.conf = [];
 		this.parse(e.document.getText());
-
 		this.scheduleLint();
 	}
 
 	onSave(d: vscode.TextDocument) {
-		this.lint();
+		// this.lint();
 	}
 
 	onOpen(d: vscode.TextDocument) {
-		this.parse(d.getText(), );
-		this.lint();
+		this.reparse(d);
 	}
 }

@@ -1,5 +1,5 @@
 import { Config, ConfigValue, ConfigValueType, ConfigOverride } from "./kconfig";
-import { AssertionError } from "assert";
+
 
 export enum TokenKind {
 	VAR = "VAR",

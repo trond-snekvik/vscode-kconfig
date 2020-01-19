@@ -1,11 +1,11 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
-import * as fs from 'fs';
 import * as fuzzy from "fuzzysort";
 import { Operator } from './evaluate';
 import { Config, ConfigOverride, ConfigEntry, Repository, IfScope } from "./kconfig";
 import * as kEnv from './env';
+import * as zephyr from './zephyr';
 import { PropFile } from './propfile';
 
 class KconfigLangHandler
@@ -57,6 +57,7 @@ class KconfigLangHandler
 		var help = new vscode.CompletionItem('help', vscode.CompletionItemKind.Keyword);
 		help.insertText = new vscode.SnippetString('help\n  ');
 		help.insertText.appendTabstop();
+		help.commitCharacters = [' ', '\t', '\n'];
 		this.operatorCompletions.push(help);
 
 		this.fileDiags = {};
@@ -95,6 +96,12 @@ class KconfigLangHandler
 			}
 		});
 
+		vscode.workspace.onDidChangeConfiguration(e => {
+			if (e.affectsConfiguration('kconfig')) {
+				kEnv.update();
+				this.doScan();
+			}
+		});
 	}
 
 	propFile(uri: vscode.Uri): PropFile {
@@ -113,12 +120,12 @@ class KconfigLangHandler
 		return this.doScan();
 	}
 
-	doScan(): Promise<string> {
+	doScan() {
 		var hrTime = process.hrtime();
 
 		var root = kEnv.resolvePath(kEnv.getConfig('root'));
 		if (root) {
-			this.repo.setRoot(vscode.Uri.file(root));
+			this.repo.setRoot(root);
 			this.repo.parse();
 		}
 
@@ -126,12 +133,10 @@ class KconfigLangHandler
 
 		vscode.window.visibleTextEditors
 			.filter(e => e.document.languageId === 'properties')
-			.forEach(e => {
-				this.propFile(e.document.uri).onOpen(e.document);
-			});
+			.forEach(e => this.propFile(e.document.uri).onOpen(e.document));
 
 		var time_ms = Math.round(hrTime[0] * 1000 + hrTime[1] / 1000000);
-		return Promise.resolve(`${Object.keys(this.repo.configs).length} entries, ${time_ms} ms`);
+		vscode.window.setStatusBarMessage(`Kconfig: ${Object.keys(this.repo.configs).length} entries, ${time_ms} ms`, 5000);
 	}
 
 	loadConfOptions(): ConfigOverride[] {
@@ -156,7 +161,7 @@ class KconfigLangHandler
 		if (conf_files) {
 			conf_files.forEach(f => {
 				try {
-					var text = fs.readFileSync(kEnv.pathReplace(f), 'utf-8');
+					var text = kEnv.readFile(vscode.Uri.file(kEnv.pathReplace(f)));
 				} catch (e) {
 					if (e instanceof Error) {
 						if ('code' in e && e['code'] === 'ENOENT') {
@@ -192,6 +197,11 @@ class KconfigLangHandler
 	}
 
 	provideDefinition(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken): vscode.ProviderResult<vscode.Location | vscode.Location[] | vscode.LocationLink[]> {
+		if (document.languageId === 'c' && !(kEnv.getConfig('kconfig.cfiles') ?? true)) {
+			return null;
+		}
+
+
 		var config = this.repo.configs[this.getSymbolName(document, position)];
 		if (config) {
 			return ((config.entries.length === 1) ?
@@ -203,6 +213,10 @@ class KconfigLangHandler
 	}
 
 	provideHover(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken): vscode.ProviderResult<vscode.Hover> {
+		if (document.languageId === 'c' && !(kEnv.getConfig('kconfig.cfiles') ?? true)) {
+			return null;
+		}
+
 		var entry = this.repo.configs[this.getSymbolName(document, position)];
 		if (!entry) {
 			return null;
@@ -466,40 +480,12 @@ export async function activate(context: vscode.ExtensionContext) {
 	kEnv.update();
 	var langHandler = new KconfigLangHandler();
 
-	var status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 10000);
-	context.subscriptions.push(status);
-
-	status.text = ' $(sync~spin) Kconfig';
-	var root = kEnv.resolvePath(kEnv.getConfig('root'));
-	if (root) {
-		status.tooltip = `Starting from ${root}`;
-	}
-	status.show();
-
-	langHandler.doScan().then(result => {
-		status.text = `Kconfig complete (${result})`;
-	}).catch(e => {
-		status.text = `$(alert) kconfig failed`;
-		status.tooltip = e;
-	}).finally(() => {
-		setTimeout(() => {
-			status.hide();
-			status.dispose();
-		}, 10000);
-	});
-
-
-	vscode.workspace.onDidChangeConfiguration(e => {
-		if (e.affectsConfiguration('kconfig.env')) {
-			kEnv.update();
-			langHandler.rescan();
-		}
-	});
-
+	zephyr.activate();
+	langHandler.doScan();
 
 	var selector = [{ language: 'kconfig', scheme: 'file' }, { language: 'properties', scheme: 'file' }];
 
-	let disposable = vscode.languages.registerDefinitionProvider(selector, langHandler);
+	let disposable = vscode.languages.registerDefinitionProvider(selector.concat([{language: 'c', scheme: 'file'}]), langHandler);
 	context.subscriptions.push(disposable);
 	disposable = vscode.languages.registerHoverProvider(selector.concat([{language: 'c', scheme: 'file'}]), langHandler);
 	context.subscriptions.push(disposable);

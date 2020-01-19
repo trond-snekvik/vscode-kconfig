@@ -415,6 +415,13 @@ export class Repository {
 		this.root?.parse();
 	}
 
+	reset() {
+		if (this.root){
+			this.setRoot(this.root.uri);
+			this.parse();
+		}
+	}
+
 	get files(): ParsedFile[] { // TODO: optimize to a managed dict?
 		if (!this.root) {
 			return [];

@@ -5,7 +5,7 @@ Made specifically for the
 
 # Features
 
-This extension adds features for two filetypes: Kconfig and configuration (.conf) files.
+This extension adds features for Kconfig, properties (.conf) and C files
 
 ## Kconfig features
 
@@ -22,13 +22,13 @@ Adds support for the Kconfig language:
 - [Breadcrumbs](https://code.visualstudio.com/docs/editor/editingevolved#_breadcrumbs) navigation
 - Find all references
 
-## Configuration file features
+## Properties file features
 
 ![](doc/completion.png)
 
-Out of the box, VS Code has syntax highlighting for configuration files.
+Out of the box, VS Code has syntax highlighting for properties files.
 
-This extension adds contextual information for the configuration files:
+This extension adds contextual information for the properties files:
 - Autocompletion based on Kconfig files
 - Hover information
 - Go to definition
@@ -44,6 +44,13 @@ This extension adds contextual information for the configuration files:
   - Add missing dependencies
   - Remove redundant entries
   - Use selector entry when trying to set entries without prompts
+
+## C file features
+
+The extension adds symbol information for `CONFIG_` defines in C files.
+Hover info and go to definition is provided for all defines starting with `CONFIG_`.
+
+This feature can be turned off with the kconfig.cfiles configuration entry.
 
 # Configuration
 
@@ -101,25 +108,46 @@ environmental completion based on `kconfig.env` and the workspace folder variabl
 No typechecking or linting is performed on the variables in these files, but if they're
 duplicated in the parsed configuration file, a warning will be produced.
 
+## kconfig.cfiles
+
+Enable or disable Kconfig hover information in C files.
+
+Default: `true`
+
+## kconfig.zephyr.board
+
+A structure defining the board and architecture used in the Zephyr configuration.
+
+Default: `{board: "nrf52_pca10040", arch: "arm"}`
+
+## kconfig.zephyr.west
+
+Path to the `west` tool.
+
+Default: `west`.
+
 # Zephyr setup
 
 Assuming that the Zephyr environment is set up
 [with West](https://docs.zephyrproject.org/latest/getting_started/index.html#get-the-source-code),
-and VS Code runs as
-[a multi-root workspace](https://code.visualstudio.com/docs/editor/multi-root-workspaces)
-with all the Zephyr project folders as roots:
+the extension will just work without any configuration needed.
 
-Zephyr has several environment variables defined:
-- `ARCH`: CPU architecture, e.g. `arm` or `x86`.
-- `BOARD`: Board being used, e.g. `nrf52_pca10040` or `native_posix`.
-- `ARCH_DIR`: The architecture directory, `arch`.
-- `SOC_DIR`: The SoC directory, `soc`.
-- `BOARD_DIR`: The board directory for the selected board, normally `${workspaceFolder:zephyr}/boards/${ARCH}/${BOARD}`
-- `CMAKE_BINARY_DIR`: The build directory of your application. The build directory doesn't
-  have to match the config file you're working with, as the output in the CMake binary
-  directory is virtually the same in every application. Example:
-  `${workspaceFolder:zephyr}/samples/bluetooth/mesh/build`.
+The entire Kconfig tree (including external modules) is parsed on startup,
+and all features will be available as soon as the parsing is complete. This typically takes only 1-2 seconds
+after the extension has been activated, and if everything went smoothly, a report will pop up in the
+status bar at the bottom of the screen detailing the number of entries found (should be in the range of
+5000-10000 depending on configuration and module set) as well as the time spent parsing.
 
-The configuration also always includes the board defconfig file in the parsing:
-Add the following entry in the `kconfig.conf_files` array:
-`${workspaceFolder:zephyr}/${BOARD_DIR}/${BOARD}_defconfig`
+The Zephyr modules (external projects used by Zephyr) are retrieved
+with West, in accordance with the [module.yml file specification](https://docs.zephyrproject.org/latest/guides/modules.html#module-inclusion).
+
+The active board is displayed on the left side of the status bar:
+
+![Zephyr board](doc/zephyr_board.png)
+
+To change boards, press the board name on the status bar, or run the "Kconfig: Set board for Zephyr"
+command from the command palette (Ctrl+Shift+P). This brings up a quick select menu populated by `west boards`.
+
+The Zephyr configuration can be completely overridden by setting the configuration items described above.
+
+> Note: DeviceTree choice macros, like `$(dt_chosen_reg_addr_hex,$(DT_CHOSEN_Z_CODE_PARTITION))` are not supported, and their configuration values will not be evaluated.

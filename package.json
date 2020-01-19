@@ -2,7 +2,7 @@
 	"name": "kconfig-lang",
 	"displayName": "Kconfig",
 	"description": "Syntax highlighting, linting and intellisense for Kconfig",
-	"version": "0.5.0",
+	"version": "1.0.0",
 	"publisher": "trond-snekvik",
 	"engines": {
 		"vscode": "^1.37.0"

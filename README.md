@@ -3,6 +3,12 @@ Kconfig language support in vscode.
 Made specifically for the
 [Zephyr project RTOS](https://www.zephyrproject.org/) to aid application development.
 
+Normally, no additional configuration is needed for Zephyr. See the bottom of the readme for details.
+
+# Installation
+
+To install, download the latest kconfig-X.X.X.vsix package from the GitHub releases tab. Open Visual Studio Code and run the "Install from VSIX..." command, either through the command palette (Ctrl+Shift+P) or by opening the extensions panel, and pressing the ... menu in the top corner. Locate the VSIX package, press "Install" and reload Visual Studio Code once prompted.
+
 # Features
 
 This extension adds features for Kconfig, properties (.conf) and C files

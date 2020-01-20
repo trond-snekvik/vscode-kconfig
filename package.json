@@ -85,7 +85,7 @@
 						}
 					},
 					"kconfig.zephyr.west": {
-						"type":"string",
+						"type": "string",
 						"description": "Location of the West tool",
 						"default": "west"
 					},

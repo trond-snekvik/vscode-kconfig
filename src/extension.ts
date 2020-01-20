@@ -417,7 +417,8 @@ class KconfigLangHandler
 		context: vscode.CodeActionContext,
 		token: vscode.CancellationToken): vscode.ProviderResult<vscode.CodeAction[]> {
 		if (document.uri.fsPath in this.propFiles) {
-			return this.propFiles[document.uri.fsPath].actions.filter(a => a.diagnostics?.[0].range.intersection(range));
+			return this.propFiles[document.uri.fsPath].actions
+				.filter(a => (!context.only || context.only === a.kind) && a.diagnostics?.[0].range.intersection(range));
 		}
 	}
 

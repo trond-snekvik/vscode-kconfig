@@ -13,12 +13,13 @@ function zephyrRoot(): string | undefined {
 
 function west(args: string[], callback?: (err: ExecException | null, stdout: string) => void): string | undefined {
 	var exe = kEnv.getConfig('zephyr.west') ?? 'west';
-	var command = exe + ' ' + args.join(' ');
+	var command = exe + ' ' + ' ' + args.join(' ');
+
 	if (callback) {
-		exec(command, callback);
+		exec(command, {cwd: vscode.workspace.workspaceFolders?.[0].uri.fsPath}, callback);
 	} else {
 		try {
-			return execSync(exe + ' ' + args.join(' ')).toString('utf-8');
+			return execSync(exe + ' ' + args.join(' '), {cwd: vscode.workspace.workspaceFolders?.[0].uri.fsPath}).toString('utf-8');
 		} catch (e) {
 			return undefined;
 		}
@@ -83,7 +84,7 @@ export function getConfig(name: string) {
 
 type BoardTuple = {board: string, arch: string};
 
-var board: BoardTuple = vscode.workspace.getConfiguration('kconfig').get('zephyr.board') ?? {board: 'nrf52_pca10040', arch: 'arm'};
+var board: BoardTuple;
 var boardStatus: vscode.StatusBarItem;
 
 
@@ -153,8 +154,10 @@ class DocumentProvider implements vscode.TextDocumentContentProvider {
 }
 
 export function activate() {
-	isZephyr = !!(vscode.workspace.workspaceFolders?.some(f => fs.existsSync(f.uri.fsPath + "/west.yml")) && west(['--help'])?.match('boards:'));
+	var hasWestYml = vscode.workspace.workspaceFolders?.some(f => fs.existsSync(f.uri.fsPath + "/west.yml"));
+	isZephyr = !!(hasWestYml && west(['--help'])?.match('boards:'));
 	if (isZephyr) {
+		board = kEnv.getConfig('zephyr.board') || {board: 'nrf52_pca10040', arch: 'arm'};
 		boardStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 2);
 		boardStatus.text = `$(tools) ${board.board}`;
 		boardStatus.command = 'kconfig.zephyr.setBoard';
@@ -169,5 +172,7 @@ export function activate() {
 		vscode.workspace.registerTextDocumentContentProvider('zephyr', provider);
 
 		kEnv.registerFileProvider('zephyr', provideDoc);
+	} else if (hasWestYml) {
+		vscode.window.showWarningMessage(`Found west.yml, but failed calling west. Is west initialized?`);
 	}
 }

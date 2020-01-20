@@ -3,16 +3,12 @@ import * as fs from 'fs';
 import { execSync, exec, ExecException } from 'child_process';
 import * as yaml from 'yaml';
 import * as kEnv from './env';
-import { Repository } from './kconfig';
 
 const MODULE_FILE = vscode.Uri.parse('zephyr:/binary.dir/Kconfig.modules');
+export var isZephyr: boolean;
 
-export function isZephyr(): boolean {
-	return vscode.workspace.workspaceFolders?.some(f => fs.existsSync(f.uri.fsPath + "/west.yml")) ?? false;
-}
-
-function zephyrRoot(): string {
-	return vscode.workspace.workspaceFolders?.find(f => f.uri.fsPath.endsWith('zephyr'))?.uri.fsPath ?? '';
+function zephyrRoot(): string | undefined {
+	return vscode.workspace.workspaceFolders?.find(f => f.uri.fsPath.endsWith('zephyr'))?.uri.fsPath;
 }
 
 function west(args: string[], callback?: (err: ExecException | null, stdout: string) => void): string | undefined {
@@ -63,20 +59,25 @@ export function getKconfigRoots() {
 */
 
 export function getConfig(name: string) {
+	var root = zephyrRoot();
+	if (!isZephyr || !zephyrRoot()) {
+		return;
+	}
+
 	switch (name) {
 		case 'env':
 			return {
 				ARCH: board.arch,
 				BOARD: board.board,
-				BOARD_DIR: `${zephyrRoot()}/boards/${board.arch}/${board.board}`,
+				BOARD_DIR: `${root}/boards/${board.arch}/${board.board}`,
 				ARCH_DIR: "arch",
 				SOC_DIR: "soc",
 				CMAKE_BINARY_DIR: "zephyr:/binary.dir"
 			};
 		case 'conf_files':
-			return [`${zephyrRoot()}/boards/${board.arch}/${board.board}/${board.board}_defconfig`];
+			return [`${root}/boards/${board.arch}/${board.board}/${board.board}_defconfig`];
 		case 'root':
-			return zephyrRoot() + '/Kconfig';
+			return root + '/Kconfig';
 	}
 }
 
@@ -152,7 +153,8 @@ class DocumentProvider implements vscode.TextDocumentContentProvider {
 }
 
 export function activate() {
-	if (isZephyr()) {
+	isZephyr = !!(vscode.workspace.workspaceFolders?.some(f => fs.existsSync(f.uri.fsPath + "/west.yml")) && west(['--help'])?.match('boards:'));
+	if (isZephyr) {
 		boardStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 2);
 		boardStatus.text = `$(tools) ${board.board}`;
 		boardStatus.command = 'kconfig.zephyr.setBoard';

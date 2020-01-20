@@ -8,7 +8,7 @@ var config = vscode.workspace.getConfiguration("kconfig");
 export function getConfig(name: string): any {
 	var conf = config.get(name);
 
-	if (conf !== undefined && zephyr.isZephyr()) {
+	if (conf !== undefined && zephyr.isZephyr) {
 		var value = zephyr.getConfig(name);
 		if (value !== undefined) {
 			return value;
@@ -17,6 +17,10 @@ export function getConfig(name: string): any {
 	return conf;
 }
 
+export function isActive(): boolean {
+	var root = getConfig('root') as string | undefined;
+	return !!(root && fs.existsSync(root));
+}
 
 var env: { [name: string]: string };
 

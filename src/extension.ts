@@ -7,6 +7,7 @@ import { Config, ConfigOverride, ConfigEntry, Repository, IfScope } from "./kcon
 import * as kEnv from './env';
 import * as zephyr from './zephyr';
 import { PropFile } from './propfile';
+import { existsSync } from 'fs';
 
 class KconfigLangHandler
 	implements
@@ -65,8 +66,12 @@ class KconfigLangHandler
 		this.staticConf = [];
 		this.diags = vscode.languages.createDiagnosticCollection('kconfig');
 		this.repo = new Repository();
+	}
 
-		vscode.workspace.onDidChangeTextDocument(async e => {
+	registerHandlers(context: vscode.ExtensionContext) {
+		var disposable: vscode.Disposable;
+
+		disposable = vscode.workspace.onDidChangeTextDocument(async e => {
 			if (e.document.languageId === 'kconfig') {
 				this.repo.onDidChange(e);
 			} else if (e.document.languageId === 'properties') {
@@ -74,15 +79,18 @@ class KconfigLangHandler
 				file.onChange(e);
 			}
 		});
+		context.subscriptions.push(disposable);
 
-		vscode.workspace.onDidSaveTextDocument(d => {
+
+		disposable = vscode.workspace.onDidSaveTextDocument(d => {
 			if (d.languageId === 'properties') {
 				var file = this.propFile(d.uri);
 				file.onSave(d);
 			}
 		});
+		context.subscriptions.push(disposable);
 
-		vscode.workspace.onDidOpenTextDocument(d => {
+		disposable = vscode.workspace.onDidOpenTextDocument(d => {
 			if (d.languageId === 'kconfig') {
 				// TODO: This must be slightly more sophisticated in the onChange listener to work properly:
 				// var diags: vscode.Diagnostic[] = [];
@@ -95,13 +103,34 @@ class KconfigLangHandler
 
 			}
 		});
+		context.subscriptions.push(disposable);
 
-		vscode.workspace.onDidChangeConfiguration(e => {
+		disposable = vscode.workspace.onDidChangeConfiguration(e => {
 			if (e.affectsConfiguration('kconfig')) {
 				kEnv.update();
 				this.doScan();
 			}
 		});
+		context.subscriptions.push(disposable);
+
+		var selector = [{ language: 'kconfig', scheme: 'file' }, { language: 'properties', scheme: 'file' }];
+
+		disposable = vscode.languages.registerDefinitionProvider(selector.concat([{language: 'c', scheme: 'file'}]), this);
+		context.subscriptions.push(disposable);
+		disposable = vscode.languages.registerHoverProvider(selector.concat([{language: 'c', scheme: 'file'}]), this);
+		context.subscriptions.push(disposable);
+		disposable = vscode.languages.registerCompletionItemProvider(selector, this);
+		context.subscriptions.push(disposable);
+		disposable = vscode.languages.registerDocumentLinkProvider({ language: 'kconfig', scheme: 'file' }, this);
+		context.subscriptions.push(disposable);
+		disposable = vscode.languages.registerCodeActionsProvider({ language: 'properties', scheme: 'file' }, this);
+		context.subscriptions.push(disposable);
+		disposable = vscode.languages.registerDocumentSymbolProvider({ language: 'kconfig', scheme: 'file' }, this);
+		context.subscriptions.push(disposable);
+		disposable = vscode.languages.registerWorkspaceSymbolProvider(this);
+		context.subscriptions.push(disposable);
+		disposable = vscode.languages.registerReferenceProvider({ language: 'kconfig', scheme: 'file' }, this);
+		context.subscriptions.push(disposable);
 	}
 
 	propFile(uri: vscode.Uri): PropFile {
@@ -473,35 +502,19 @@ class KconfigLangHandler
 
 }
 
-// this method is called when your extension is activated
-// your extension is activated the very first time the command is executed
 export async function activate(context: vscode.ExtensionContext) {
 
-	kEnv.update();
-	var langHandler = new KconfigLangHandler();
-
 	zephyr.activate();
+	kEnv.update();
+
+	if (!kEnv.isActive()) {
+		return;
+	}
+
+	var langHandler = new KconfigLangHandler();
+	langHandler.registerHandlers(context);
+
 	langHandler.doScan();
-
-	var selector = [{ language: 'kconfig', scheme: 'file' }, { language: 'properties', scheme: 'file' }];
-
-	let disposable = vscode.languages.registerDefinitionProvider(selector.concat([{language: 'c', scheme: 'file'}]), langHandler);
-	context.subscriptions.push(disposable);
-	disposable = vscode.languages.registerHoverProvider(selector.concat([{language: 'c', scheme: 'file'}]), langHandler);
-	context.subscriptions.push(disposable);
-	disposable = vscode.languages.registerCompletionItemProvider(selector, langHandler);
-	context.subscriptions.push(disposable);
-	disposable = vscode.languages.registerDocumentLinkProvider({ language: 'kconfig', scheme: 'file' }, langHandler);
-	context.subscriptions.push(disposable);
-	disposable = vscode.languages.registerCodeActionsProvider({ language: 'properties', scheme: 'file' }, langHandler);
-	context.subscriptions.push(disposable);
-	disposable = vscode.languages.registerDocumentSymbolProvider({ language: 'kconfig', scheme: 'file' }, langHandler);
-	context.subscriptions.push(disposable);
-	disposable = vscode.languages.registerWorkspaceSymbolProvider(langHandler);
-	context.subscriptions.push(disposable);
-	disposable = vscode.languages.registerReferenceProvider({ language: 'kconfig', scheme: 'file' }, langHandler);
-	context.subscriptions.push(disposable);
 }
 
-// this method is called when your extension is deactivated
 export function deactivate() {}

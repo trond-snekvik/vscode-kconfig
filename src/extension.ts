@@ -25,6 +25,7 @@ class KconfigLangHandler
 	propFiles: { [uri: string]: PropFile };
 	operatorCompletions: vscode.CompletionItem[];
 	repo: Repository;
+	conf: ConfigOverride[];
 
 	constructor() {
 		this.operatorCompletions = [
@@ -66,6 +67,8 @@ class KconfigLangHandler
 		this.staticConf = [];
 		this.diags = vscode.languages.createDiagnosticCollection('kconfig');
 		this.repo = new Repository();
+
+		this.conf = this.loadConfOptions();
 	}
 
 	registerHandlers(context: vscode.ExtensionContext) {
@@ -108,6 +111,7 @@ class KconfigLangHandler
 		disposable = vscode.workspace.onDidChangeConfiguration(e => {
 			if (e.affectsConfiguration('kconfig')) {
 				kEnv.update();
+				this.conf = this.loadConfOptions();
 				this.doScan();
 			}
 		});
@@ -135,14 +139,13 @@ class KconfigLangHandler
 
 	propFile(uri: vscode.Uri): PropFile {
 		if (!(uri.fsPath in this.propFiles)) {
-			this.propFiles[uri.fsPath] = new PropFile(uri, this.repo, this.loadConfOptions(), this.diags);
+			this.propFiles[uri.fsPath] = new PropFile(uri, this.repo, this.conf, this.diags);
 		}
 
 		return this.propFiles[uri.fsPath];
 	}
 
 	rescan() {
-		this.staticConf = [];
 		this.staticConf = [];
 		this.diags.clear();
 

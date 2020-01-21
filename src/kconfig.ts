@@ -399,11 +399,26 @@ export class Config {
 export class Repository {
 	configs: {[name: string]: Config};
 	root?: ParsedFile;
-	// files: ParsedFile[];
+	diags: vscode.DiagnosticCollection;
+	openEditors: vscode.Uri[];
 
-	constructor() {
+	constructor(diags: vscode.DiagnosticCollection) {
 		this.configs = {};
-		// this.files = [];
+		this.diags = diags;
+
+		this.openEditors = vscode.window.visibleTextEditors.map(e => e.document.uri);
+		this.openEditors.forEach(uri => this.setDiags(uri));
+
+		vscode.window.onDidChangeVisibleTextEditors(e => {
+			var newUris = e.map(e => e.document.uri);
+			var removed = this.openEditors.filter(old => !newUris.some(uri => uri.fsPath === old.fsPath));
+			var added = newUris.filter(newUri => !this.openEditors.some(uri => uri.fsPath === newUri.fsPath));
+
+			removed.forEach(removed => this.diags.delete(removed));
+			added.forEach(add => this.setDiags(add));
+
+			this.openEditors = newUris;
+		});
 	}
 
 	setRoot(uri: vscode.Uri) {
@@ -413,10 +428,11 @@ export class Repository {
 
 	parse() {
 		this.root?.parse();
+		this.openEditors.forEach(uri => this.setDiags(uri));
 	}
 
 	reset() {
-		if (this.root){
+		if (this.root) {
 			this.setRoot(this.root.uri);
 			this.parse();
 		}
@@ -430,6 +446,14 @@ export class Repository {
 		return [this.root, ...this.root.children()];
 	}
 
+	setDiags(uri: vscode.Uri) {
+		this.diags.set(uri,
+			this.files
+				.filter(f => f.uri.fsPath === uri.fsPath)
+				.map(f => f.diags)
+				.reduce((sum, diags) => sum.concat(diags.filter(d => !sum.some(existing => existing.range.start.line === d.range.start.line))), []));
+	}
+
 	onDidChange(change: vscode.TextDocumentChangeEvent) {
 		if (change.contentChanges.length === 0) {
 			return;
@@ -441,6 +465,8 @@ export class Repository {
 			.filter(f => f.uri.fsPath === change.document.uri.fsPath)
 			.forEach(f => f.onDidChange(change));
 		hrTime = process.hrtime(hrTime);
+
+		this.openEditors.forEach(uri => this.setDiags(uri));
 
 		console.log(`Handled change to ${change.document.fileName} in ${hrTime[0] * 1000 + hrTime[1] / 1000000} ms.`);
 		console.log(`\tFiles: ${this.files.length}`);

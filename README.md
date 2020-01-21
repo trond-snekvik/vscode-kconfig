@@ -27,6 +27,7 @@ Adds support for the Kconfig language:
 - Resolves environment replacements
 - [Breadcrumbs](https://code.visualstudio.com/docs/editor/editingevolved#_breadcrumbs) navigation
 - Find all references
+- Diagnostics
 
 ## Properties file features
 

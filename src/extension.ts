@@ -66,7 +66,7 @@ class KconfigLangHandler
 		this.propFiles = {};
 		this.staticConf = [];
 		this.diags = vscode.languages.createDiagnosticCollection('kconfig');
-		this.repo = new Repository();
+		this.repo = new Repository(this.diags);
 
 		this.conf = this.loadConfOptions();
 	}
@@ -77,7 +77,7 @@ class KconfigLangHandler
 		disposable = vscode.workspace.onDidChangeTextDocument(async e => {
 			if (e.document.languageId === 'kconfig') {
 				this.repo.onDidChange(e);
-			} else if (e.document.languageId === 'properties') {
+			} else if (e.document.languageId === 'properties' && e.contentChanges.length > 0) {
 				var file = this.propFile(e.document.uri);
 				file.onChange(e);
 			}
@@ -94,16 +94,8 @@ class KconfigLangHandler
 		context.subscriptions.push(disposable);
 
 		disposable = vscode.workspace.onDidOpenTextDocument(d => {
-			if (d.languageId === 'kconfig') {
-				// TODO: This must be slightly more sophisticated in the onChange listener to work properly:
-				// var diags: vscode.Diagnostic[] = [];
-				// this.repo.files.filter(f => f.uri.fsPath === d.uri.fsPath).forEach(f => {
-				// 	diags.push(...f.diags);
-				// });
-				// this.diags.set(d.uri, diags);
-			} else if (d.languageId === 'properties') {
+			if (d.languageId === 'properties') {
 				this.propFile(d.uri).onOpen(d);
-
 			}
 		});
 		context.subscriptions.push(disposable);

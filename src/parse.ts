@@ -73,7 +73,6 @@ export class ParsedFile {
 				existingInclusion = oldInclusions.splice(existingIndex, 1)[0];
 			}
 
-
 			if (existingInclusion) {
 				i.file = existingInclusion.file;
 			} else {
@@ -317,13 +316,14 @@ export class ParsedFile {
 				continue;
 			}
 
-			if (!entry) {
-				// todo: add diagnostic?
-				continue;
-			}
+			var noEntryDiag = new vscode.Diagnostic(lineRange, `Token is only valid in an entry context`, vscode.DiagnosticSeverity.Warning);
 
 			match = line.match(typeMatch);
 			if (match) {
+				if (!entry) {
+					this.diags.push(noEntryDiag);
+					continue;
+				}
 				entry.type = match[1] as ConfigValueType;
 				entry.text = match[2];
 				entry.extend(lineNumber);
@@ -331,18 +331,30 @@ export class ParsedFile {
 			}
 			match = line.match(selectMatch);
 			if (match) {
+				if (!entry) {
+					this.diags.push(noEntryDiag);
+					continue;
+				}
 				entry.selects.push({name: match[1], condition: createExpression(match[2])});
 				entry.extend(lineNumber);
 				continue;
 			}
 			match = line.match(promptMatch);
 			if (match) {
+				if (!entry) {
+					this.diags.push(noEntryDiag);
+					continue;
+				}
 				entry.text = match[1];
 				entry.extend(lineNumber);
 				continue;
 			}
 			match = line.match(helpMatch);
 			if (match) {
+				if (!entry) {
+					this.diags.push(noEntryDiag);
+					continue;
+				}
 				help = true;
 				helpIndent = null;
 				entry.help = '';
@@ -353,6 +365,10 @@ export class ParsedFile {
 			var ifStatement;
 			match = line.match(defaultMatch);
 			if (match) {
+				if (!entry) {
+					this.diags.push(noEntryDiag);
+					continue;
+				}
 				ifStatement = match[1].match(/(.*)if\s+([^#]+)/);
 				if (ifStatement) {
 					entry.defaults.push({ value: ifStatement[1], condition: createExpression(ifStatement[2]) });
@@ -364,6 +380,10 @@ export class ParsedFile {
 			}
 			match = line.match(defMatch);
 			if (match) {
+				if (!entry) {
+					this.diags.push(noEntryDiag);
+					continue;
+				}
 				entry.type = match[1] as ConfigValueType;
 				ifStatement = match[2].match(/(.*)if\s+([^#]+)/);
 				if (ifStatement) {
@@ -376,6 +396,10 @@ export class ParsedFile {
 			}
 			match = line.match(defStringMatch);
 			if (match) {
+				if (!entry) {
+					this.diags.push(noEntryDiag);
+					continue;
+				}
 				entry.type = 'string';
 				ifStatement = match[1].match(/(.*)if\s+([^#]+)/);
 				if (ifStatement) {
@@ -388,6 +412,10 @@ export class ParsedFile {
 			}
 			match = line.match(rangeMatch);
 			if (match) {
+				if (!entry) {
+					this.diags.push(noEntryDiag);
+					continue;
+				}
 				entry.ranges.push({
 					min: match[1],
 					max: match[2],
@@ -405,7 +433,7 @@ export class ParsedFile {
 				continue;
 			}
 
-			console.log('Unknown line: ' + line);
+			this.diags.push(new vscode.Diagnostic(lineRange, `Invalid token`, vscode.DiagnosticSeverity.Error));
 		}
 	}
 }

@@ -144,7 +144,7 @@ export class PropFile {
 				addRedundancyAction(c, diag);
 
 				// Find all selectors:
-				var selectors = all.filter(e => e.selects.find(s => s.name === c.config.name && (!s.condition || s.condition.solve(all, this.overrides))));
+				var selectors = all.filter(e => e.selects.find(s => s.name === c.config.name && (!s.condition || s.condition.solve(this.repo, this.overrides))));
 				this.actions.push(...selectors.map(s => {
 					var action = new vscode.CodeAction(`Replace with CONFIG_${s.name}`, vscode.CodeActionKind.QuickFix);
 					action.edit = new vscode.WorkspaceEdit();
@@ -155,7 +155,7 @@ export class PropFile {
 			}
 
 			if (c.config.type && ['int', 'hex'].includes(c.config.type)) {
-				var range = c.config.getRange(all, this.overrides);
+				var range = c.config.getRange(this.repo, this.overrides);
 				if ((range.min !== undefined && override < range.min) || (range.max !== undefined && override > range.max)) {
 					this.lintDiags.push(new vscode.Diagnostic(line,
 						`Entry ${c.value} outside range \`${range.min}\`-\`${range.max}\``,
@@ -164,7 +164,7 @@ export class PropFile {
 			}
 
 			// tslint:disable-next-line: triple-equals
-			if (override == c.config.defaultValue(all, this.overrides)) {
+			if (override == c.config.defaultValue(this.repo, this.overrides)) {
 				diag = new vscode.Diagnostic(line,
 					`Entry ${c.config.name} is redundant (same as default)`,
 					vscode.DiagnosticSeverity.Hint);
@@ -174,7 +174,7 @@ export class PropFile {
 				addRedundancyAction(c, diag);
 			}
 
-			var missingDependency = c.config.missingDependency(all, this.overrides);
+			var missingDependency = c.config.missingDependency(this.repo, this.overrides);
 			if (missingDependency) {
 				if (c.value === 'n') {
 					diag = new vscode.Diagnostic(line,
@@ -199,7 +199,7 @@ export class PropFile {
 				if (variables.length > 0 && variables.length < 4) {
 					for (var code = 0; code < (1 << variables.length); code++) {
 						var overrides: ConfigOverride[] = variables.map((v, i) => { return { config: v!, value: (code & (1 << i)) ? 'y' : 'n' }; });
-						if (resolveExpression(missingDependency, all, overrides.concat(this.overrides))) {
+						if (resolveExpression(missingDependency, this.repo, overrides.concat(this.overrides))) {
 							var newEntries: ConfigOverride[] = [];
 							var existingEntries: ConfigOverride[] = [];
 							overrides.forEach(o => {
@@ -243,7 +243,7 @@ export class PropFile {
 				return;
 			}
 
-			var selector = c.config.selector(all, this.overrides.filter((_, index) => index !== i));
+			var selector = c.config.selector(this.repo, this.overrides.filter((_, index) => index !== i));
 			if (selector) {
 				diag = new vscode.Diagnostic(
 					line,
@@ -270,7 +270,7 @@ export class PropFile {
 				return;
 			}
 
-			var actualValue = c.config.evaluate(all, this.overrides);
+			var actualValue = c.config.evaluate(this.repo, this.overrides);
 			if (override !== actualValue) {
 				this.lintDiags.push(new vscode.Diagnostic(line,
 					`Entry ${c.config.name} assigned value ${c.value}, but evaluated to ${c.config.toValueString(actualValue)}`,

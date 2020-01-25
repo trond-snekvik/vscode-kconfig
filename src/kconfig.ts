@@ -40,7 +40,7 @@ export abstract class Scope {
 		return this.id === other.id;
 	}
 
-	abstract evaluate(all: Config[], overrides: ConfigOverride[]): boolean;
+	abstract evaluate(repo: Repository, overrides: ConfigOverride[]): boolean;
 }
 
 export class IfScope extends Scope {
@@ -52,8 +52,8 @@ export class IfScope extends Scope {
 		this.expr = createExpression(expression);
 	}
 
-	evaluate(all: Config[], overrides: ConfigOverride[]) {
-		return !!(this.expr?.solve(all, overrides) ?? true); // default to false instead?
+	evaluate(repo: Repository, overrides: ConfigOverride[]) {
+		return !!(this.expr?.solve(repo, overrides) ?? true); // default to false instead?
 	}
 }
 
@@ -64,8 +64,8 @@ export class MenuScope extends Scope {
 		this.dependencies = [];
 	}
 
-	evaluate(all: Config[], overrides: ConfigOverride[]) {
-		return this.dependencies.every(d => resolveExpression(d, all, overrides));
+	evaluate(repo: Repository, overrides: ConfigOverride[]) {
+		return this.dependencies.every(d => resolveExpression(d, repo, overrides));
 	}
 }
 
@@ -82,7 +82,7 @@ export class ChoiceScope extends Scope {
 	}
 	set name(name: string) {}
 
-	evaluate(all: Config[], overrides: ConfigOverride[]) {
+	evaluate(repo: Repository, overrides: ConfigOverride[]) {
 		return true;
 	}
 }
@@ -130,8 +130,8 @@ export class ConfigEntry {
 		return new vscode.Location(this.file.uri, new vscode.Range(this.lines.start, 0, this.lines.end, 99999));
 	}
 
-	isActive(all: Config[], overrides: ConfigOverride[]): boolean {
-		return !this.scope || this.scope.evaluate(all, overrides);
+	isActive(repo: Repository, overrides: ConfigOverride[]): boolean {
+		return !this.scope || this.scope.evaluate(repo, overrides);
 	}
 }
 
@@ -216,15 +216,15 @@ export class Config {
 		}
 	}
 
-	defaultValue(all: Config[], overrides: ConfigOverride[] = []): ConfigValue {
+	defaultValue(repo: Repository, overrides: ConfigOverride[] = []): ConfigValue {
 		var dflt: ConfigDefault | undefined;
-		this.entries.filter(e => e.isActive(all, overrides)).find(e => {
-			dflt = e.defaults.find(d => d.condition === undefined || d.condition.solve(all, overrides) === true);
+		this.entries.filter(e => e.isActive(repo, overrides)).some(e => {
+			dflt = e.defaults.find(d => !d.condition || d.condition.solve(repo, overrides) === true);
 			return dflt;
 		});
 
 		if (dflt) {
-			return resolveExpression(dflt.value, all, overrides);
+			return resolveExpression(dflt.value, repo, overrides);
 		}
 
 		return false;
@@ -275,17 +275,17 @@ export class Config {
 		}
 	}
 
-	getRange(all: Config[], overrides: ConfigOverride[] = []): {min: number, max: number} {
+	getRange(repo: Repository, overrides: ConfigOverride[] = []): {min: number, max: number} {
 		var range: ConfigValueRange | undefined;
-		this.entries.filter(e => e.isActive(all, overrides)).find(e => {
-			range = e.ranges.find(r => r.condition === undefined || r.condition.solve(all, overrides) === true);
+		this.entries.filter(e => e.isActive(repo, overrides)).find(e => {
+			range = e.ranges.find(r => r.condition === undefined || r.condition.solve(repo, overrides) === true);
 			return range;
 		});
 
 		if (range) {
 			return {
-				min: this.evaluateSymbol(range.min, all, overrides) as number,
-				max: this.evaluateSymbol(range.max, all, overrides) as number,
+				min: this.evaluateSymbol(range.min, repo, overrides) as number,
+				max: this.evaluateSymbol(range.max, repo, overrides) as number,
 			};
 		}
 
@@ -293,53 +293,53 @@ export class Config {
 
 	}
 
-	evaluateSymbol(name: string, all: Config[], overrides: ConfigOverride[] = []): ConfigValue {
+	evaluateSymbol(name: string, repo: Repository, overrides: ConfigOverride[] = []): ConfigValue {
 		if (name.match(/^\s*(0x[\da-fA-F]+|[\-+]?\d+)\s*$/)) {
 			return Number(name);
 		} else if (name.match(/^\s*[ynm]\s*$/)) {
 			return name.trim() !== 'n';
 		}
 
-		var symbol = all.find(c => c.name === name);
+		var symbol = repo.configs[name];
 		if (!symbol) {
 			return false;
 		}
-		return symbol.evaluate(all, overrides);
+		return symbol.evaluate(repo, overrides);
 	}
 
-	missingDependency(all: Config[], overrides: ConfigOverride[] = []): string | undefined {
-		return this.dependencies.find(d => !resolveExpression(d, all, overrides));
+	missingDependency(repo: Repository, overrides: ConfigOverride[] = []): string | undefined {
+		return this.dependencies.find(d => !resolveExpression(d, repo, overrides));
 	}
 
-	selector(all: Config[], overrides: ConfigOverride[] = []) {
+	selector(repo: Repository, overrides: ConfigOverride[] = []) {
 		if (this.type !== 'bool' && this.type !== 'tristate') {
 			return undefined;
 		}
 
 		var selectorFilter = (s: { name: string, condition?: Expression }) => {
-			return s.name === this.name && (s.condition === undefined || s.condition.solve(all, overrides));
+			return s.name === this.name && (s.condition === undefined || s.condition.solve(repo, overrides));
 		};
 
 		var select = overrides.find(
 			o => (
 				(o.config.type === 'bool' || o.config.type === 'tristate') &&
 				o.config.isEnabled(o.value) &&
-				o.config.selects.find(selectorFilter)
+				o.config.selects.some(selectorFilter)
 			)
-		) || all.find(
+		) || Object.values(repo.configs).find(
 			c => (
 				(c.type === 'bool' || c.type === 'tristate') &&
-				c.selects.find(selectorFilter) &&
-				c.evaluate(all, overrides)
+				c.selects.some(selectorFilter) &&
+				c.evaluate(repo, overrides)
 			)
 		);
 
 		return select;
 	}
 
-	evaluate(all: Config[], overrides: ConfigOverride[] = []): ConfigValue {
+	evaluate(repo: Repository, overrides: ConfigOverride[] = []): ConfigValue {
 		// All dependencies must be true
-		if (this.missingDependency(all, overrides)) {
+		if (this.missingDependency(repo, overrides)) {
 			return false;
 		}
 
@@ -348,11 +348,11 @@ export class Config {
 			return this.resolveValueString(override.value);
 		}
 
-		if (this.selector(all, overrides)) {
+		if (this.selector(repo, overrides)) {
 			return true;
 		}
 
-		return this.defaultValue(all, overrides) || false;
+		return this.defaultValue(repo, overrides) || false;
 	}
 
 	symbolKind(): vscode.SymbolKind {

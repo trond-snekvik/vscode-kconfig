@@ -67,8 +67,7 @@ class KconfigLangHandler
 		this.staticConf = [];
 		this.diags = vscode.languages.createDiagnosticCollection('kconfig');
 		this.repo = new Repository(this.diags);
-
-		this.conf = this.loadConfOptions();
+		this.conf = [];
 	}
 
 	registerHandlers(context: vscode.ExtensionContext) {
@@ -154,6 +153,8 @@ class KconfigLangHandler
 		}
 
 		hrTime = process.hrtime(hrTime);
+
+		this.conf = this.loadConfOptions();
 
 		vscode.window.visibleTextEditors
 			.filter(e => e.document.languageId === 'properties')

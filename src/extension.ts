@@ -429,7 +429,17 @@ class KconfigLangHandler
 		var entries: ConfigEntry[] = file.entries;
 		var scopes: { [id: string]: vscode.DocumentSymbol } = {};
 		var topLevelSymbols: vscode.DocumentSymbol[] = [];
-		try {
+
+		function addToList(list: vscode.DocumentSymbol[], child: vscode.DocumentSymbol) {
+			var existing = list.find(c => c.name === child.name);
+			if (existing) {
+				existing.children.push(...child.children.filter(c => !existing!.children.includes(c)));
+				existing.range = existing.range.union(child.range);
+			} else {
+				list.push(child);
+			}
+		}
+
 		entries.forEach(e => {
 			if (token.isCancellationRequested) {
 				return;
@@ -455,7 +465,8 @@ class KconfigLangHandler
 				if (!symbol) {
 					var name: string = scope.name;
 					if ((scope instanceof IfScope) && (scope.expr?.operator === Operator.VAR)) {
-						name = this.repo.configs[scope.expr.var!.value].text || scope.name;
+						var config = this.repo.configs[scope.expr.var!.value];
+						name = config?.text ?? config?.name ?? scope.name;
 					}
 
 					symbol = new vscode.DocumentSymbol(name, '',
@@ -465,25 +476,15 @@ class KconfigLangHandler
 					scopes[scope.id] = symbol;
 				}
 
-				var existing = symbol.children.find(c => c.name === child.name);
-				if (existing) {
-					existing.children.push(...child.children.filter(c => !existing!.children.includes(c)));
-					existing.range = existing.range.union(child.range);
-				} else {
-					symbol.children.push(child);
-				}
+				addToList(symbol.children, child);
 
 				child = symbol;
 				scope = scope.parent;
 			}
 
-			if (!topLevelSymbols.includes(child)) {
-				topLevelSymbols.push(child);
-			}
+			addToList(topLevelSymbols, child);
 		});
-		} catch (e) {
-			console.error(e);
-		}
+
 		return topLevelSymbols;
 	}
 

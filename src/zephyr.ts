@@ -39,7 +39,7 @@ export function getKconfigRoots() {
 			var text = fs.readFileSync(file).toString("utf-8");
 			var obj = yaml.parse(text);
 
-			return m + "/" + (obj["build"]["kconfig"] || "zephyr/Kconfig");
+			return m + "/" + (obj?.["build"]?.["kconfig"] ?? "zephyr/Kconfig");
 		})
 		.filter(file => fs.existsSync(file));
 }

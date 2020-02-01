@@ -454,21 +454,21 @@ export class Repository {
 				.reduce((sum, diags) => sum.concat(diags.filter(d => !sum.some(existing => existing.range.start.line === d.range.start.line))), []));
 	}
 
-	onDidChange(change: vscode.TextDocumentChangeEvent) {
-		if (change.contentChanges.length === 0) {
+	onDidChange(uri: vscode.Uri, change?: vscode.TextDocumentChangeEvent) {
+		if (change && change.contentChanges.length === 0) {
 			return;
 		}
 
 		var hrTime = process.hrtime();
 
-		this.files
-			.filter(f => f.uri.fsPath === change.document.uri.fsPath)
-			.forEach(f => f.onDidChange(change));
+		var files = this.files.filter(f => f.uri.fsPath === uri.fsPath);
+
+		files.forEach(f => f.onDidChange(change));
 		hrTime = process.hrtime(hrTime);
 
 		this.openEditors.forEach(uri => this.setDiags(uri));
 
-		console.log(`Handled change to ${change.document.fileName} in ${hrTime[0] * 1000 + hrTime[1] / 1000000} ms.`);
+		console.log(`Handled changes to ${files.length} versions of ${uri.fsPath} in ${hrTime[0] * 1000 + hrTime[1] / 1000000} ms.`);
 		console.log(`\tFiles: ${this.files.length}`);
 		console.log(`\tConfigs: ${Object.values(this.configs).length}`);
 		console.log(`\tEmpty configs: ${Object.values(this.configs).filter(c => c.entries.length === 0).length}`);

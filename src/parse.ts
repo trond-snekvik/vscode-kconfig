@@ -45,19 +45,21 @@ export class ParsedFile {
 		return this.inclusions.map(i => new vscode.DocumentLink(i.range, i.file.uri));
 	}
 
-	onDidChange(change: vscode.TextDocumentChangeEvent) {
-		if (change.document.version === this.version) {
-			console.log(`Duplicate version of ${change.document.fileName}`);
-			return;
+	onDidChange(change?: vscode.TextDocumentChangeEvent) {
+		if (change) {
+			if (change.document.version === this.version) {
+				console.log(`Duplicate version of ${change.document.fileName}`);
+				return;
+			}
+			this.version = change.document.version;
+			var firstDirtyLine = Math.min(...change.contentChanges.map(c => c.range.start.line));
 		}
-		this.version = change.document.version;
-		var firstDirtyLine = Math.min(...change.contentChanges.map(c => c.range.start.line));
 
 		var oldInclusions = this.inclusions;
 
 		this.wipeEntries();
 
-		this.parseRaw(change.document.getText());
+		this.parseRaw(change ? change.document.getText() : kEnv.readFile(this.uri));
 
 		this.inclusions.forEach(i => {
 			var existingIndex: number;

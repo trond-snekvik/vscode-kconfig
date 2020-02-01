@@ -75,7 +75,7 @@ class KconfigLangHandler
 
 		disposable = vscode.workspace.onDidChangeTextDocument(async e => {
 			if (e.document.languageId === 'kconfig') {
-				this.repo.onDidChange(e);
+				this.repo.onDidChange(e.document.uri, e);
 			} else if (e.document.languageId === 'properties' && e.contentChanges.length > 0) {
 				var file = this.propFile(e.document.uri);
 				file.onChange(e);
@@ -83,6 +83,15 @@ class KconfigLangHandler
 		});
 		context.subscriptions.push(disposable);
 
+		// Watch changes to files that aren't opened in vscode.
+		// Handles git checkouts and similar out-of-editor events
+		var watcher = vscode.workspace.createFileSystemWatcher('**/Kconfig*', true, false, true);
+		watcher.onDidChange(uri => {
+			if (!vscode.workspace.textDocuments.some(d => d.uri.fsPath === uri.fsPath)) {
+				this.repo.onDidChange(uri);
+			}
+		});
+		context.subscriptions.push(watcher);
 
 		disposable = vscode.workspace.onDidSaveTextDocument(d => {
 			if (d.languageId === 'properties') {

@@ -12,14 +12,15 @@ export class PropFile {
 	private timeout?: NodeJS.Timeout;
 	private parseDiags: vscode.Diagnostic[] = [];
 	private lintDiags: vscode.Diagnostic[] = [];
+	private version: number;
 
 	constructor(uri: vscode.Uri, repo: Repository, baseConf: ConfigOverride[], diags: vscode.DiagnosticCollection) {
 		this.uri = uri;
 		this.repo = repo;
 		this.baseConf = baseConf;
 		this.diags = diags;
+		this.version = 0;
 	}
-
 
 	get overrides(): ConfigOverride[] {
 		return this.conf.concat(this.baseConf);
@@ -99,11 +100,14 @@ export class PropFile {
 	parse(text: string) {
 		this.parseDiags = [];
 		this.conf = [];
+		this.version++;
+		console.log("Parsing...");
 
 		var lines = text.split(/\r?\n/g);
 
 		this.conf = lines.map((l, i) => this.parseLine(l, i)).filter(c => c !== undefined) as ConfigOverride[];
 		this.updateDiags();
+		console.log("Parsing done.");
 	}
 
 	reparse(d: vscode.TextDocument) {
@@ -111,10 +115,22 @@ export class PropFile {
 		this.lint();
 	}
 
-	lint() {
+	// Utility for desynchronizing context in lint
+	private skipTick() {
+		// Can't use await Promise.resolve(), for some reason.
+		// Probably some vscode runtime is changing the behavior of this...
+		return new Promise(resolve => setImmediate(() => resolve()));
+	}
+
+	async lint() {
 		if (this.timeout) {
 			clearTimeout(this.timeout);
 		}
+
+		console.log("lint starting");
+		await this.skipTick();
+
+		var prevDiags = this.lintDiags;
 
 		this.lintDiags = [];
 		this.actions = [];
@@ -130,7 +146,20 @@ export class PropFile {
 			this.actions.push(action);
 		};
 
-		this.conf.forEach((c, i) => {
+		var version = this.version;
+
+		for (var i = 0; i < this.conf.length; i++) {
+			await this.skipTick();
+			if (version !== this.version) {
+				console.log("Abandoning lint");
+				// Reinstate the warnings for the lines we didn't cover yet.
+				this.lintDiags.push(...prevDiags.filter(d => d.range.start.line > (c?.line ?? -1)));
+				this.updateDiags();
+				return;
+			}
+
+			var c = this.conf[i];
+
 			var override = c.config.resolveValueString(c.value);
 			var line = new vscode.Range(c.line!, 0, c.line!, 99999999);
 			var diag: vscode.Diagnostic;
@@ -240,7 +269,7 @@ export class PropFile {
 					}
 				}
 				this.lintDiags.push(diag);
-				return;
+				continue;
 			}
 
 			var selector = c.config.selector(this.repo, this.overrides.filter((_, index) => index !== i));
@@ -267,7 +296,7 @@ export class PropFile {
 				diag.tags = [vscode.DiagnosticTag.Unnecessary];
 				this.lintDiags.push(diag);
 				addRedundancyAction(c, diag);
-				return;
+				continue;
 			}
 
 			var actualValue = c.config.evaluate(this.repo, this.overrides);
@@ -275,10 +304,11 @@ export class PropFile {
 				this.lintDiags.push(new vscode.Diagnostic(line,
 					`Entry ${c.config.name} assigned value ${c.value}, but evaluated to ${c.config.toValueString(actualValue)}`,
 					vscode.DiagnosticSeverity.Warning));
-				return;
+				continue;
 			}
-		});
+		}
 
+		console.log("Lint done.");
 		this.updateDiags();
 	}
 
@@ -316,7 +346,7 @@ export class PropFile {
 	}
 
 	onSave(d: vscode.TextDocument) {
-		// this.lint();
+		this.lint();
 	}
 
 	onOpen(d: vscode.TextDocument) {

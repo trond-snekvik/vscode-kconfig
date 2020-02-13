@@ -7,7 +7,6 @@ import { Config, ConfigOverride, ConfigEntry, Repository, IfScope } from "./kcon
 import * as kEnv from './env';
 import * as zephyr from './zephyr';
 import { PropFile } from './propfile';
-import { existsSync } from 'fs';
 
 class KconfigLangHandler
 	implements
@@ -19,7 +18,6 @@ class KconfigLangHandler
 		vscode.CodeActionProvider,
 		vscode.DocumentSymbolProvider,
 		vscode.WorkspaceSymbolProvider {
-	staticConf: ConfigOverride[];
 	diags: vscode.DiagnosticCollection;
 	fileDiags: {[uri: string]: vscode.Diagnostic[]};
 	propFiles: { [uri: string]: PropFile };
@@ -64,7 +62,6 @@ class KconfigLangHandler
 
 		this.fileDiags = {};
 		this.propFiles = {};
-		this.staticConf = [];
 		this.diags = vscode.languages.createDiagnosticCollection('kconfig');
 		this.repo = new Repository(this.diags);
 		this.conf = [];
@@ -146,7 +143,7 @@ class KconfigLangHandler
 	}
 
 	rescan() {
-		this.staticConf = [];
+		this.propFiles = {};
 		this.diags.clear();
 
 		return this.doScan();

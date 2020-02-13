@@ -407,8 +407,8 @@ class KconfigLangHandler
 		}
 		return Object.values(this.repo.configs)
 			.filter(config => (
-				config.selects.find(s => s.name === entry!.name) ||
-				config.dependencies.find(d => d.search(new RegExp(`\\b${entry!.name}\\b`)) !== -1)))
+				config.allSelects(entry.name).length > 0 ||
+				config.hasDependency(entry!.name)))
 			.map(config => config.entries[0].loc); // TODO: return the entries instead?
 	}
 

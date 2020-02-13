@@ -1,4 +1,4 @@
-import { Config, ConfigValue, ConfigValueType, ConfigOverride, Repository } from "./kconfig";
+import { Config, ConfigValue, ConfigValueType, ConfigOverride, Repository, EvalContext } from "./kconfig";
 
 
 export enum TokenKind {
@@ -67,13 +67,6 @@ function operatorFromToken(t: Token): Operator {
 	}
 }
 
-function typecheck(op: string, val: ConfigValue, ...types: string[]): ConfigValue {
-	if (!types.includes(typeof val)) {
-		throw new ExpressionError(`Invalid type for ${op} operator: ${typeof val}`);
-	}
-	return val;
-}
-
 export class Expression {
 	operator: Operator;
 	operands: Expression[];
@@ -85,16 +78,16 @@ export class Expression {
 		this.var = v;
 	}
 
-	solve(repo: Repository, overrides: ConfigOverride[]): ConfigValue {
+	solve(ctx: EvalContext): ConfigValue {
 		var lhs, rhs;
 
 		switch (this.operator) {
 			case Operator.VAR:
-				lhs = repo.configs[this.var!.value];
+				lhs = ctx.repo.configs[this.var!.value];
 				if (!lhs) {
 					return false;
 				}
-				return lhs.evaluate(repo, overrides);
+				return lhs.evaluate(ctx);
 			case Operator.LITERAL:
 				if (!this.var) {
 					throw new ExpressionError('Parser error');
@@ -110,36 +103,36 @@ export class Expression {
 				}
 				throw new ExpressionError('Unknown literal', this.var);
 			case Operator.NOT:
-				return !typecheck('!', this.operands[0].solve(repo, overrides), 'boolean');
+				return !this.operands[0].solve(ctx);
 			case Operator.AND:
-				return typecheck('&&', this.operands[0].solve(repo, overrides), 'boolean') && typecheck('&&', this.operands[1].solve(repo, overrides), 'boolean');
+				return this.operands[0].solve(ctx) && this.operands[1].solve(ctx);
 			case Operator.OR:
-				return typecheck('||', this.operands[0].solve(repo, overrides), 'boolean') || typecheck('||', this.operands[1].solve(repo, overrides), 'boolean');
+				return this.operands[0].solve(ctx) || this.operands[1].solve(ctx);
 			case Operator.PARENTHESIS:
-				return this.operands[0].solve(repo, overrides);
+				return this.operands[0].solve(ctx);
 			case Operator.EQUAL:
-				lhs = this.operands[0].solve(repo, overrides);
-				rhs = this.operands[1].solve(repo, overrides);
+				lhs = this.operands[0].solve(ctx);
+				rhs = this.operands[1].solve(ctx);
 				return (lhs === rhs);
 			case Operator.NEQUAL:
-				lhs = this.operands[0].solve(repo, overrides);
-				rhs = this.operands[1].solve(repo, overrides);
+				lhs = this.operands[0].solve(ctx);
+				rhs = this.operands[1].solve(ctx);
 				return (lhs !== rhs);
 			case Operator.GREATER:
-				lhs = this.operands[0].solve(repo, overrides);
-				rhs = this.operands[1].solve(repo, overrides);
+				lhs = this.operands[0].solve(ctx);
+				rhs = this.operands[1].solve(ctx);
 				return (lhs > rhs);
 			case Operator.LESS:
-				lhs = this.operands[0].solve(repo, overrides);
-				rhs = this.operands[1].solve(repo, overrides);
+				lhs = this.operands[0].solve(ctx);
+				rhs = this.operands[1].solve(ctx);
 				return (lhs < rhs);
 			case Operator.GREATER_EQUAL:
-				lhs = this.operands[0].solve(repo, overrides);
-				rhs = this.operands[1].solve(repo, overrides);
+				lhs = this.operands[0].solve(ctx);
+				rhs = this.operands[1].solve(ctx);
 				return (lhs >= rhs);
 			case Operator.LESS_EQUAL:
-				lhs = this.operands[0].solve(repo, overrides);
-				rhs = this.operands[1].solve(repo, overrides);
+				lhs = this.operands[0].solve(ctx);
+				rhs = this.operands[1].solve(ctx);
 				return (lhs <= rhs);
 			case Operator.UNKNOWN:
 				return false;
@@ -328,11 +321,11 @@ function makeExpr(tokens: Token[]): Expression {
 	return new Expression(op, operands);
 }
 
-export function resolveExpression(raw: string, repo: Repository, overrides: ConfigOverride[]): ConfigValue {
+export function resolveExpression(raw: string, ctx: EvalContext): ConfigValue {
 	var tokens = tokenizeExpression(raw);
 	var expr = makeExpr(tokens);
 
-	return expr.solve(repo, overrides);
+	return expr.solve(ctx);
 }
 
 export function createExpression(raw: string): Expression | undefined {

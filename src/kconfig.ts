@@ -11,6 +11,29 @@ export type ConfigDefault = {value: string, condition?: Expression};
 export type ConfigSelect = {name: string, condition?: Expression};
 export type LineRange = {start: number, end: number};
 
+export class EvalContext {
+	repo: Repository;
+	overrides: ConfigOverride[];
+	evaluated: {[name: string]: ConfigValue};
+
+	constructor(repo: Repository, overrides: ConfigOverride[]) {
+		this.repo = repo;
+		this.overrides = overrides;
+		this.evaluated = {};
+	}
+
+	/* Cache results: */
+
+	register(c: Config, value: ConfigValue): ConfigValue {
+		this.evaluated[c.name] = value;
+		return value;
+	}
+
+	resolve(c: Config): ConfigValue | undefined {
+		return this.evaluated[c.name];
+	}
+}
+
 export abstract class Scope {
 	lines: LineRange;
 	name: string;
@@ -40,7 +63,11 @@ export abstract class Scope {
 		return this.id === other.id;
 	}
 
-	abstract evaluate(repo: Repository, overrides: ConfigOverride[]): boolean;
+	evaluate(ctx: EvalContext): boolean {
+		return this.resolve(ctx) && (this.parent?.evaluate(ctx) ?? true);
+	}
+
+	protected abstract resolve(ctx: EvalContext): boolean;
 }
 
 export class IfScope extends Scope {
@@ -52,8 +79,8 @@ export class IfScope extends Scope {
 		this.expr = createExpression(expression);
 	}
 
-	evaluate(repo: Repository, overrides: ConfigOverride[]) {
-		return !!(this.expr?.solve(repo, overrides) ?? true); // default to false instead?
+	resolve(ctx: EvalContext) {
+		return !!(this.expr?.solve(ctx) ?? true); // default to false instead?
 	}
 }
 
@@ -64,8 +91,8 @@ export class MenuScope extends Scope {
 		this.dependencies = [];
 	}
 
-	evaluate(repo: Repository, overrides: ConfigOverride[]) {
-		return this.dependencies.every(d => resolveExpression(d, repo, overrides));
+	resolve(ctx: EvalContext) {
+		return this.dependencies.every(d => resolveExpression(d, ctx));
 	}
 }
 
@@ -82,7 +109,7 @@ export class ChoiceScope extends Scope {
 	}
 	set name(name: string) {}
 
-	evaluate(repo: Repository, overrides: ConfigOverride[]) {
+	resolve(ctx: EvalContext) {
 		return true;
 	}
 }
@@ -96,6 +123,7 @@ export class ConfigEntry {
 	ranges: ConfigValueRange[];
 	type?: ConfigValueType;
 	text?: string;
+	prompt: boolean;
 	dependencies: string[];
 	selects: ConfigSelect[];
 	implys: ConfigSelect[];
@@ -111,6 +139,7 @@ export class ConfigEntry {
 		this.selects = [];
 		this.implys = [];
 		this.defaults = [];
+		this.prompt = false;
 
 		this.config.entries.push(this);
 	}
@@ -130,8 +159,8 @@ export class ConfigEntry {
 		return new vscode.Location(this.file.uri, new vscode.Range(this.lines.start, 0, this.lines.end, 99999));
 	}
 
-	isActive(repo: Repository, overrides: ConfigOverride[]): boolean {
-		return !this.scope || this.scope.evaluate(repo, overrides);
+	isActive(ctx: EvalContext): boolean {
+		return !this.scope || this.scope.evaluate(ctx);
 	}
 }
 
@@ -172,22 +201,54 @@ export class Config {
 		return ranges;
 	}
 
-	get dependencies(): string[] {
+	get implys(): ConfigSelect[] {
+		var implys: ConfigSelect[] = [];
+		this.entries.forEach(e => implys.push(...e.implys));
+		return implys;
+	}
+
+	activeEntries(ctx: EvalContext): ConfigEntry[] {
+		return this.entries.filter(e => e.isActive(ctx));
+	}
+
+	dependencies(ctx: EvalContext): string[] {
 		var dependencies: string[] = [];
 		this.entries.forEach(e => dependencies.push(...e.dependencies));
 		return dependencies;
 	}
 
-	get selects(): ConfigSelect[] {
+	selects(ctx: EvalContext, name: string): Config[] {
+		var configs = <Config[]>[];
+		this.entries.forEach(e => {
+			configs.push(
+				...e.selects
+					.filter(s => (s.name === name) && (!s.condition || s.condition.solve(ctx)))
+					.map(s => ctx.repo.configs[s.name])
+					.filter(c => c !== undefined)
+			);
+			configs.push(
+				...e.implys
+					.filter(s => (s.name === name) && !ctx.overrides.some(o => o.config.name === name) && (!s.condition || s.condition.solve(ctx)))
+					.map(s => ctx.repo.configs[s.name])
+					.filter(c => c !== undefined)
+			);
+		});
+
+		if (configs.length > 0 && !this.evaluate(ctx)) {
+			return [];
+		}
+
+		return configs;
+	}
+
+	allSelects(entryName: string): ConfigSelect[] {
 		var selects: ConfigSelect[] = [];
-		this.entries.forEach(e => selects.push(...e.selects));
+		this.entries.forEach(e => selects.push(...e.selects.filter(s => s.name === entryName)));
 		return selects;
 	}
 
-	get implys(): ConfigSelect[] {
-		var implys: ConfigSelect[] = [];
-		this.entries.forEach(e => implys.push(...e.implys));
-		return implys;
+	hasDependency(name: string) {
+		return this.entries.some(e => e.dependencies.some(s => s === name));
 	}
 
 	removeEntry(entry: ConfigEntry) {
@@ -216,29 +277,29 @@ export class Config {
 		}
 	}
 
-	defaultValue(repo: Repository, overrides: ConfigOverride[] = []): ConfigValue {
+	defaultValue(ctx: EvalContext): ConfigValue {
 		var dflt: ConfigDefault | undefined;
-		this.entries.filter(e => e.isActive(repo, overrides)).some(e => {
-			dflt = e.defaults.find(d => !d.condition || d.condition.solve(repo, overrides) === true);
+		this.activeEntries(ctx).some(e => {
+			dflt = e.defaults.find(d => !d.condition || d.condition.solve(ctx) === true);
 			return dflt;
 		});
 
 		if (dflt) {
-			return resolveExpression(dflt.value, repo, overrides);
+			return resolveExpression(dflt.value, ctx);
 		}
 
 		return false;
 	}
 
-	isEnabled(value?: string) {
+	isEnabled(value: string) {
 		switch (this.type) {
 			case 'bool':
 			case 'tristate':
-				return (value === undefined) ? this.defaults.some(d => d.value === 'y') : (value === 'y');
+				return value === 'y';
 			case 'int':
-				return (value === undefined) ? this.defaults.some(d => d.value !== '0') : (value !== '0');
+				return value !== '0';
 			case 'hex':
-				return (value === undefined) ? this.defaults.some(d => d.value !== '0x0') : (value !== '0x0');
+				return value !== '0x0';
 			default:
 				return true;
 		}
@@ -275,17 +336,17 @@ export class Config {
 		}
 	}
 
-	getRange(repo: Repository, overrides: ConfigOverride[] = []): {min: number, max: number} {
+	getRange(ctx: EvalContext): {min: number, max: number} {
 		var range: ConfigValueRange | undefined;
-		this.entries.filter(e => e.isActive(repo, overrides)).find(e => {
-			range = e.ranges.find(r => r.condition === undefined || r.condition.solve(repo, overrides) === true);
+		this.activeEntries(ctx).find(e => {
+			range = e.ranges.find(r => r.condition === undefined || r.condition.solve(ctx) === true);
 			return range;
 		});
 
 		if (range) {
 			return {
-				min: this.evaluateSymbol(range.min, repo, overrides) as number,
-				max: this.evaluateSymbol(range.max, repo, overrides) as number,
+				min: this.evaluateSymbol(range.min, ctx) as number,
+				max: this.evaluateSymbol(range.max, ctx) as number,
 			};
 		}
 
@@ -293,66 +354,62 @@ export class Config {
 
 	}
 
-	evaluateSymbol(name: string, repo: Repository, overrides: ConfigOverride[] = []): ConfigValue {
+	evaluateSymbol(name: string, ctx: EvalContext): ConfigValue {
 		if (name.match(/^\s*(0x[\da-fA-F]+|[\-+]?\d+)\s*$/)) {
 			return Number(name);
 		} else if (name.match(/^\s*[ynm]\s*$/)) {
 			return name.trim() !== 'n';
 		}
 
-		var symbol = repo.configs[name];
+		var symbol = ctx.repo.configs[name];
 		if (!symbol) {
 			return false;
 		}
-		return symbol.evaluate(repo, overrides);
+		return symbol.evaluate(ctx);
 	}
 
-	missingDependency(repo: Repository, overrides: ConfigOverride[] = []): string | undefined {
-		return this.dependencies.find(d => !resolveExpression(d, repo, overrides));
+	missingDependency(ctx: EvalContext): string | undefined {
+		return this.dependencies(ctx).find(d => !resolveExpression(d, ctx));
 	}
 
-	selector(repo: Repository, overrides: ConfigOverride[] = []) {
+	selector(ctx: EvalContext): Config | undefined {
 		if (this.type !== 'bool' && this.type !== 'tristate') {
 			return undefined;
 		}
 
-		var selectorFilter = (s: { name: string, condition?: Expression }) => {
-			return s.name === this.name && (s.condition === undefined || s.condition.solve(repo, overrides));
-		};
-
-		var select = overrides.find(
-			o => (
-				(o.config.type === 'bool' || o.config.type === 'tristate') &&
-				o.config.isEnabled(o.value) &&
-				o.config.selects.some(selectorFilter)
-			)
-		) || Object.values(repo.configs).find(
+		var select = Object.values(ctx.repo.configs).find(
 			c => (
 				(c.type === 'bool' || c.type === 'tristate') &&
-				c.selects.some(selectorFilter) &&
-				c.evaluate(repo, overrides)
+				!c.hasDependency(this.name) &&
+				(c.selects(ctx, this.name).length > 0)
 			)
 		);
 
 		return select;
 	}
 
-	evaluate(repo: Repository, overrides: ConfigOverride[] = []): ConfigValue {
+	evaluate(ctx: EvalContext): ConfigValue {
+		// Check cached result first:
+		var result = ctx.resolve(this);
+		if (result !== undefined) {
+			return result;
+		}
+
 		// All dependencies must be true
-		if (this.missingDependency(repo, overrides)) {
-			return false;
+		if (this.missingDependency(ctx)) {
+			return ctx.register(this, false);
 		}
 
-		var override = overrides.find(o => o.config.name === this.name);
+		if (!this.entries.some(e => e.type && e.isActive(ctx))) {
+			return ctx.register(this, false);
+		}
+
+		var override = ctx.overrides.find(o => o.config.name === this.name);
 		if (override) {
-			return this.resolveValueString(override.value);
+			return ctx.register(this, this.resolveValueString(override.value));
 		}
 
-		if (this.selector(repo, overrides)) {
-			return true;
-		}
-
-		return this.defaultValue(repo, overrides) || false;
+		return ctx.register(this, this.defaultValue(ctx) || !!this.selector(ctx));
 	}
 
 	symbolKind(): vscode.SymbolKind {
@@ -393,6 +450,10 @@ export class Config {
 			case undefined:
 				return vscode.CompletionItemKind.Property;
 		}
+	}
+
+	toString(): string {
+		return `Config(${this.name})`;
 	}
 }
 

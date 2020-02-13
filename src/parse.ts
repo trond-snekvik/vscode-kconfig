@@ -328,6 +328,9 @@ export class ParsedFile {
 				}
 				entry.type = match[1] as ConfigValueType;
 				entry.text = match[2];
+				if (match[2]) {
+					entry.prompt = true;
+				}
 				entry.extend(lineNumber);
 				continue;
 			}
@@ -348,6 +351,7 @@ export class ParsedFile {
 					continue;
 				}
 				entry.text = match[1];
+				entry.prompt = true;
 				entry.extend(lineNumber);
 				continue;
 			}
@@ -432,6 +436,11 @@ export class ParsedFile {
 			}
 
 			if (line.match(/^\s*optional/)) {
+				continue;
+			}
+
+			if (line.match(/^\s*\w+\s*:\=.*/)) {
+				this.diags.push(new vscode.Diagnostic(lineRange, `Macros aren't supported, this will be ignored.`, vscode.DiagnosticSeverity.Warning));
 				continue;
 			}
 

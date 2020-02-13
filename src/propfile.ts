@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { Config, ConfigOverride, Repository } from "./kconfig";
+import { Config, ConfigOverride, Repository, EvalContext } from "./kconfig";
 import { tokenizeExpression, TokenKind, resolveExpression } from './evaluate';
 
 export class PropFile {
@@ -93,8 +93,8 @@ export class PropFile {
 		return { config: entry, value: match[2], line: lineNumber };
 	}
 
-	private updateDiags() {
-		this.diags.set(this.uri, this.parseDiags.concat(this.lintDiags));
+	updateDiags() {
+		this.diags.set(this.uri, [...this.parseDiags, ...this.lintDiags]);
 	}
 
 	parse(text: string) {
@@ -112,7 +112,7 @@ export class PropFile {
 
 	reparse(d: vscode.TextDocument) {
 		this.parse(d.getText());
-		this.lint();
+		this.scheduleLint();
 	}
 
 	// Utility for desynchronizing context in lint
@@ -130,10 +130,11 @@ export class PropFile {
 		console.log("lint starting");
 		await this.skipTick();
 
-		var prevDiags = this.lintDiags;
+		var ctx = new EvalContext(this.repo, this.overrides);
 
-		this.lintDiags = [];
-		this.actions = [];
+		var diags = <vscode.Diagnostic[]>[];
+
+		var actions = <vscode.CodeAction[]>[];
 
 		var all = Object.values(this.repo.configs);
 
@@ -143,7 +144,7 @@ export class PropFile {
 			action.edit.delete(this.uri, new vscode.Range(c.line!, 0, c.line! + 1, 0));
 			action.diagnostics = [diag];
 			action.isPreferred = true;
-			this.actions.push(action);
+			actions.push(action);
 		};
 
 		var version = this.version;
@@ -152,9 +153,6 @@ export class PropFile {
 			await this.skipTick();
 			if (version !== this.version) {
 				console.log("Abandoning lint");
-				// Reinstate the warnings for the lines we didn't cover yet.
-				this.lintDiags.push(...prevDiags.filter(d => d.range.start.line > (c?.line ?? -1)));
-				this.updateDiags();
 				return;
 			}
 
@@ -169,12 +167,12 @@ export class PropFile {
 				diag = new vscode.Diagnostic(line,
 					`Entry ${c.config.name} has no effect (has no prompt)`,
 					vscode.DiagnosticSeverity.Warning);
-				this.lintDiags.push(diag);
+				diags.push(diag);
 				addRedundancyAction(c, diag);
 
 				// Find all selectors:
-				var selectors = all.filter(e => e.selects.find(s => s.name === c.config.name && (!s.condition || s.condition.solve(this.repo, this.overrides))));
-				this.actions.push(...selectors.map(s => {
+				var selectors = all.filter(e => e.selects(ctx, c.config.name));
+				actions.push(...selectors.map(s => {
 					var action = new vscode.CodeAction(`Replace with CONFIG_${s.name}`, vscode.CodeActionKind.QuickFix);
 					action.edit = new vscode.WorkspaceEdit();
 					action.edit.replace(this.uri, line, `CONFIG_${s.name}=y`);
@@ -184,26 +182,26 @@ export class PropFile {
 			}
 
 			if (c.config.type && ['int', 'hex'].includes(c.config.type)) {
-				var range = c.config.getRange(this.repo, this.overrides);
+				var range = c.config.getRange(ctx);
 				if ((range.min !== undefined && override < range.min) || (range.max !== undefined && override > range.max)) {
-					this.lintDiags.push(new vscode.Diagnostic(line,
+					diags.push(new vscode.Diagnostic(line,
 						`Entry ${c.value} outside range \`${range.min}\`-\`${range.max}\``,
 						vscode.DiagnosticSeverity.Error));
 				}
 			}
 
 			// tslint:disable-next-line: triple-equals
-			if (override == c.config.defaultValue(this.repo, this.overrides)) {
+			if (override == c.config.defaultValue(ctx)) {
 				diag = new vscode.Diagnostic(line,
 					`Entry ${c.config.name} is redundant (same as default)`,
 					vscode.DiagnosticSeverity.Hint);
 				diag.tags = [vscode.DiagnosticTag.Unnecessary];
-				this.lintDiags.push(diag);
+				diags.push(diag);
 
 				addRedundancyAction(c, diag);
 			}
 
-			var missingDependency = c.config.missingDependency(this.repo, this.overrides);
+			var missingDependency = c.config.missingDependency(ctx);
 			if (missingDependency) {
 				if (c.value === 'n') {
 					diag = new vscode.Diagnostic(line,
@@ -218,6 +216,13 @@ export class PropFile {
 						vscode.DiagnosticSeverity.Warning);
 				}
 
+				var dep = ctx.repo.configs[missingDependency];
+				if (dep) {
+					diag.relatedInformation = [
+						new vscode.DiagnosticRelatedInformation(dep.entries[0].loc, `${missingDependency} declared here`)
+					];
+				}
+
 				var tokens = tokenizeExpression(missingDependency);
 				var variables = tokens
 					.filter(t => t.kind === TokenKind.VAR)
@@ -228,7 +233,7 @@ export class PropFile {
 				if (variables.length > 0 && variables.length < 4) {
 					for (var code = 0; code < (1 << variables.length); code++) {
 						var overrides: ConfigOverride[] = variables.map((v, i) => { return { config: v!, value: (code & (1 << i)) ? 'y' : 'n' }; });
-						if (resolveExpression(missingDependency, this.repo, overrides.concat(this.overrides))) {
+						if (resolveExpression(missingDependency, new EvalContext(this.repo, overrides.concat(this.overrides)))) {
 							var newEntries: ConfigOverride[] = [];
 							var existingEntries: ConfigOverride[] = [];
 							overrides.forEach(o => {
@@ -263,45 +268,45 @@ export class PropFile {
 							}
 							action.isPreferred = true;
 							action.diagnostics = [diag];
-							this.actions.push(action);
+							actions.push(action);
 							break;
 						}
 					}
 				}
-				this.lintDiags.push(diag);
+				diags.push(diag);
 				continue;
 			}
 
-			var selector = c.config.selector(this.repo, this.overrides.filter((_, index) => index !== i));
+			var selector = c.config.selector(ctx);
 			if (selector) {
 				diag = new vscode.Diagnostic(
 					line,
-					`Entry ${c.config.name} is ${c.value === "n" ? "ignored" : "redundant"} (Already selected by ${
-						selector instanceof Config ? selector.name : selector.config.name
-					})`,
+					`Entry ${c.config.name} is ${c.value === "n" ? "ignored" : "redundant"} (Already selected by ${selector.name})`,
 					c.value === "n" ? vscode.DiagnosticSeverity.Warning : vscode.DiagnosticSeverity.Hint
 				);
-				if (selector instanceof Config) {
+
+				var o = ctx.overrides.find(o => o.config.name === selector!.name);
+				if (o && o.line !== undefined) {
+					diag.relatedInformation = [
+						new vscode.DiagnosticRelatedInformation(
+							new vscode.Location(this.uri, new vscode.Position(o.line, 0)),
+							`Selected by CONFIG_${o.config.name}=${o.value}`
+						)
+					];
+				} else {
 					diag.relatedInformation = [
 						new vscode.DiagnosticRelatedInformation(selector.entries[0].loc, `Selected by ${selector.name}`)
 					];
-				} else if (selector.line !== undefined) {
-					diag.relatedInformation = [
-						new vscode.DiagnosticRelatedInformation(
-							new vscode.Location(this.uri, new vscode.Position(selector.line, 0)),
-							`Selected by CONFIG_${selector.config.name}=${selector.value}`
-						)
-					];
 				}
 				diag.tags = [vscode.DiagnosticTag.Unnecessary];
-				this.lintDiags.push(diag);
+				diags.push(diag);
 				addRedundancyAction(c, diag);
 				continue;
 			}
 
-			var actualValue = c.config.evaluate(this.repo, this.overrides);
+			var actualValue = c.config.evaluate(ctx);
 			if (override !== actualValue) {
-				this.lintDiags.push(new vscode.Diagnostic(line,
+				diags.push(new vscode.Diagnostic(line,
 					`Entry ${c.config.name} assigned value ${c.value}, but evaluated to ${c.config.toValueString(actualValue)}`,
 					vscode.DiagnosticSeverity.Warning));
 				continue;
@@ -309,6 +314,8 @@ export class PropFile {
 		}
 
 		console.log("Lint done.");
+		this.lintDiags = diags;
+		this.actions = actions;
 		this.updateDiags();
 	}
 

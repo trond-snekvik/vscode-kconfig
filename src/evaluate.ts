@@ -17,6 +17,7 @@ export enum TokenKind {
 	LESS = "LESS",
 	GREATER_EQUAL = "GREATER_EQUAL",
 	LESS_EQUAL = "LESS_EQUAL",
+	INVALID = "INVALID",
 }
 export enum Operator {
 	VAR = "VAR",
@@ -62,6 +63,7 @@ function operatorFromToken(t: Token): Operator {
 		case TokenKind.LESS: return Operator.LESS;
 		case TokenKind.GREATER_EQUAL: return Operator.GREATER_EQUAL;
 		case TokenKind.LESS_EQUAL: return Operator.LESS_EQUAL;
+		case TokenKind.INVALID: return Operator.UNKNOWN;
 	}
 }
 
@@ -139,6 +141,8 @@ export class Expression {
 				lhs = this.operands[0].solve(repo, overrides);
 				rhs = this.operands[1].solve(repo, overrides);
 				return (lhs <= rhs);
+			case Operator.UNKNOWN:
+				return false;
 		}
 
 		throw new ExpressionError('Invalid expression');
@@ -205,6 +209,29 @@ export function tokenizeExpression(expr: string): Token[] {
 		if (variable) {
 			tokens.push({ kind: TokenKind.VAR, value: variable[0] });
 			expr = expr.slice(variable[0].length);
+			continue;
+		}
+
+		var macro = expr.match(/^\$\(/);
+		if (macro) {
+			expr = expr.slice(macro[0].length);
+			var value = macro[0];
+			var level = 1;
+			while (level > 0 || expr.length !== 0) {
+				var brace = expr.match(/^.*?([()])/);
+				if (!brace) {
+					break;
+				}
+
+				if (brace[1] === '(') {
+					level++;
+				} else {
+					level--;
+				}
+				value += brace[0];
+				expr = expr.slice(brace[0].length);
+			}
+			tokens.push({kind: TokenKind.INVALID, value: value});
 			continue;
 		}
 

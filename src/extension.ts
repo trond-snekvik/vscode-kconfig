@@ -107,8 +107,7 @@ class KconfigLangHandler
 		disposable = vscode.workspace.onDidChangeConfiguration(e => {
 			if (e.affectsConfiguration('kconfig')) {
 				kEnv.update();
-				this.conf = this.loadConfOptions();
-				this.doScan();
+				this.rescan();
 			}
 		});
 		context.subscriptions.push(disposable);

@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import { execSync, exec, ExecException } from 'child_process';
 import * as yaml from 'yaml';
 import * as kEnv from './env';
+import * as glob from 'glob';
 
 const MODULE_FILE = vscode.Uri.parse('zephyr:/binary.dir/Kconfig.modules');
 export var isZephyr: boolean;
@@ -70,19 +71,19 @@ export function getConfig(name: string) {
 			return {
 				ARCH: board.arch,
 				BOARD: board.board,
-				BOARD_DIR: `${root}/boards/${board.arch}/${board.board}`,
+				BOARD_DIR: board.dir,
 				ARCH_DIR: "arch",
 				SOC_DIR: "soc",
 				CMAKE_BINARY_DIR: "zephyr:/binary.dir"
 			};
 		case 'conf_files':
-			return [`${root}/boards/${board.arch}/${board.board}/${board.board}_defconfig`];
+			return [`${board.dir}/${board.board}_defconfig`];
 		case 'root':
 			return root + '/Kconfig';
 	}
 }
 
-type BoardTuple = {board: string, arch: string};
+type BoardTuple = {board: string, arch: string, dir: string};
 
 var board: BoardTuple;
 var boardStatus: vscode.StatusBarItem;
@@ -103,7 +104,17 @@ export function selectBoard(): Promise<BoardTuple> {
 				{placeHolder: 'Select a board to use for Kconfig input'}
 			).then(selection => {
 				if (selection) {
-					resolve({board: selection!.label, arch: selection!.description!});
+					var board = selection!.label;
+					var arch = selection!.description!;
+					glob(`**/${board}_defconfig`, {absolute: true, cwd: `${zephyrRoot()}/boards/${arch}`}, (err, matches) => {
+						if (err || matches.length === 0) {
+							reject();
+						}
+
+						var dir = matches[0].slice(0, matches[0].length - `${board}_defconfig`.length - 1);
+
+						resolve({ board: board, arch: arch, dir: dir });
+					});
 				} else {
 					reject();
 				}

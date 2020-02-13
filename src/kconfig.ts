@@ -406,10 +406,11 @@ export class Repository {
 		this.configs = {};
 		this.diags = diags;
 
-		this.openEditors = vscode.window.visibleTextEditors.map(e => e.document.uri);
+		this.openEditors = vscode.window.visibleTextEditors.filter(e => e.document.languageId === "kconfig").map(e => e.document.uri);
 		this.openEditors.forEach(uri => this.setDiags(uri));
 
 		vscode.window.onDidChangeVisibleTextEditors(e => {
+			e = e.filter(e => e.document.languageId === 'kconfig');
 			var newUris = e.map(e => e.document.uri);
 			var removed = this.openEditors.filter(old => !newUris.some(uri => uri.fsPath === old.fsPath));
 			var added = newUris.filter(newUri => !this.openEditors.some(uri => uri.fsPath === newUri.fsPath));

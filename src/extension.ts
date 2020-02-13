@@ -45,7 +45,6 @@ class KconfigLangHandler
 			new vscode.CompletionItem('visible if', vscode.CompletionItemKind.Keyword),
 			new vscode.CompletionItem('default', vscode.CompletionItemKind.Keyword),
 		];
-		this.operatorCompletions.forEach(c => c.commitCharacters = [' ']);
 
 		var range = new vscode.CompletionItem('range', vscode.CompletionItemKind.Keyword);
 		range.insertText = new vscode.SnippetString('range ');

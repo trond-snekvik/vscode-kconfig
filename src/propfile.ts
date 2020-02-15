@@ -90,7 +90,15 @@ export class PropFile {
 			return undefined;
 		}
 
-		return { config: entry, value: match[2], line: lineNumber };
+		var value: string;
+		var stringMatch = match[2].match(/^"(.*)"$/);
+		if (stringMatch) {
+			value = stringMatch[1];
+		} else {
+			value = match[2];
+		}
+
+		return { config: entry, value: value, line: lineNumber };
 	}
 
 	updateDiags() {

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as glob from "glob";
-import { Repository, Scope, Config, ConfigValueType, ConfigEntry, ConfigKind, IfScope, MenuScope, ChoiceScope } from "./kconfig";
+import { Repository, Scope, Config, ConfigValueType, ConfigEntry, ConfigKind, IfScope, MenuScope, ChoiceScope, ChoiceEntry } from "./kconfig";
 import * as kEnv from './env';
 import { createExpression } from './evaluate';
 
@@ -126,7 +126,7 @@ export class ParsedFile {
 
 	private parseRaw(text: string) {
 		this.reset();
-		var choice: ConfigEntry | null = null;
+		var choice: ChoiceEntry | null = null;
 		var env = {...this.env};
 		var scope = this.scope;
 
@@ -135,24 +135,24 @@ export class ParsedFile {
 			return;
 		}
 
-		const configMatch    = /^\s*(menuconfig|config)\s+([\d\w_]+)/;
+		const configMatch    = /^\s*(menuconfig|config)\s+(\w+)/;
 		const sourceMatch    = /^\s*(source|rsource|osource)\s+"((?:.*?[^\\])?)"/;
-		const choiceMatch    = /^\s*choice(?:\s+([\d\w_]+))?/;
+		const choiceMatch    = /^\s*choice(?:\s+(\w+))?/;
 		const endChoiceMatch = /^\s*endchoice\b/;
 		const ifMatch        = /^\s*if\s+([^#]+)/;
 		const endifMatch     = /^\s*endif\b/;
 		const menuMatch      = /^\s*((?:main)?menu)\s+"((?:.*?[^\\])?)"/;
 		const endMenuMatch   = /^\s*endmenu\b/;
 		const depOnMatch     = /^\s*depends\s+on\s+([^#]+)/;
-		const envMatch       = /^\s*([\w\d_\-]+)\s*=\s*([^#]+)/;
+		const envMatch       = /^\s*([\w\-]+)\s*=\s*([^#]+)/;
 		const typeMatch      = /^\s*(bool|tristate|string|hex|int)(?:\s+"((?:.*?[^\\])?)")?/;
-		const selectMatch    = /^\s*(?:select|imply)\s+([\w\d_]+)(?:\s+if\s+([^#]+))?/;
+		const selectMatch    = /^\s*(?:select|imply)\s+(\w+)(?:\s+if\s+([^#]+))?/;
 		const promptMatch    = /^\s*prompt\s+"((?:.*?[^\\])?)"/;
 		const helpMatch      = /^\s*help\b/;
 		const defaultMatch   = /^\s*default\s+([^#]+)/;
 		const defMatch       = /^\s*def_(bool|tristate|int|hex)\s+([^#]+)/;
 		const defStringMatch = /^\s*def_string\s+"((?:.*?[^\\])?)"(?:\s+if\s+([^#]+))?/;
-		const rangeMatch     = /^\s*range\s+([\-+]?[\w\d_]+)\s+([\-+]?[\w\d_]+)(?:\s+if\s+([^#]+))?/;
+		const rangeMatch     = /^\s*range\s+([\-+]?\w+)\s+([\-+]?\w+)(?:\s+if\s+([^#]+))?/;
 
 		var entry: ConfigEntry | null = null;
 		var help = false;
@@ -215,37 +215,36 @@ export class ParsedFile {
 				this.entries.push(entry);
 
 				if (choice) {
-					var dflt = choice.defaults.find(d => d.value === name);
-					if (dflt) {
-						entry.defaults.push({ value: 'y', condition: dflt.condition });
-					}
+					choice.choices.push(entry.config);
 				}
 				continue;
 			}
 			match = line.match(sourceMatch);
 			if (match) {
 				var includeFile = kEnv.resolvePath(match[2], match[1] === 'rsource' ? path.dirname(this.uri.fsPath) : undefined);
-				if (includeFile) {
-					var range = new vscode.Range(
-						new vscode.Position(lineNumber, match[1].length + 1),
-						new vscode.Position(lineNumber, match[0].length - 1));
-					if (includeFile.scheme === 'file') {
-						var matches = glob.sync(includeFile.fsPath);
-						matches.forEach(match => {
-							this.inclusions.push({range: range, file: new ParsedFile(this.repo, vscode.Uri.file(match), env, scope, this)});
-						});
-					} else {
-						this.inclusions.push({range: range, file: new ParsedFile(this.repo, includeFile, env, scope, this)});
+				var range = new vscode.Range(
+					new vscode.Position(lineNumber, match[1].length + 1),
+					new vscode.Position(lineNumber, match[0].length - 1));
+				if (includeFile.scheme === 'file') {
+					var matches = glob.sync(includeFile.fsPath);
+					matches.forEach(match => {
+						this.inclusions.push({range: range, file: new ParsedFile(this.repo, vscode.Uri.file(match), env, scope, this)});
+					});
+					if (matches.length === 0) {
+						console.log(`Unable to resolve include ${match[2]} @ ${this.uri.fsPath}:L${lineNumber + 1}`);
+						this.diags.push(new vscode.Diagnostic(lineRange, 'Unable to resolve include'));
 					}
+				} else {
+					this.inclusions.push({range: range, file: new ParsedFile(this.repo, includeFile, env, scope, this)});
 				}
 				continue;
 			}
 			match = line.match(choiceMatch);
 			if (match) {
 				name = match[1] || `<choice @ ${vscode.workspace.asRelativePath(this.uri.fsPath)}:${lineNumber}>`;
-				entry = new ConfigEntry(new Config(name, 'choice', this.repo), lineNumber, this, scope);
-				scope = new ChoiceScope(entry);
-				choice = entry;
+				choice = new ChoiceEntry(name, lineNumber, this.repo, this, scope);
+				scope = new ChoiceScope(choice);
+				entry = choice;
 				continue;
 			}
 			match = line.match(endChoiceMatch);

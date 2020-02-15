@@ -97,8 +97,8 @@ export class MenuScope extends Scope {
 }
 
 export class ChoiceScope extends Scope {
-	choice: ConfigEntry;
-	constructor(choice: ConfigEntry) {
+	choice: ChoiceEntry;
+	constructor(choice: ChoiceEntry) {
 		super('choice', choice.config.name, choice.lines.start, choice.file, vscode.SymbolKind.Enum, choice.scope);
 		this.choice = choice;
 	}
@@ -277,18 +277,18 @@ export class Config {
 		}
 	}
 
-	defaultValue(ctx: EvalContext): ConfigValue {
+	defaultValue(ctx: EvalContext): ConfigValue | undefined {
 		var dflt: ConfigDefault | undefined;
 		this.activeEntries(ctx).some(e => {
 			dflt = e.defaults.find(d => !d.condition || d.condition.solve(ctx) === true);
-			return dflt;
+			return dflt !== undefined;
 		});
 
-		if (dflt) {
+		if (dflt !== undefined) {
 			return resolveExpression(dflt.value, ctx);
 		}
 
-		return false;
+		return undefined;
 	}
 
 	isEnabled(value: string) {
@@ -388,6 +388,28 @@ export class Config {
 		return select;
 	}
 
+	falseValue(ctx: EvalContext) {
+		if (!this.text) {
+			return false;
+		}
+
+
+		switch (this.type) {
+			case "bool":
+			case "tristate":
+				return false;
+			case "hex":
+			case "int":
+				if (this.ranges.length > 0) {
+					return this.getRange(ctx).min;
+				}
+				return 0;
+			case "string":
+				return "";
+		}
+		return false;
+	}
+
 	evaluate(ctx: EvalContext): ConfigValue {
 		// Check cached result first:
 		var result = ctx.resolve(this);
@@ -409,7 +431,23 @@ export class Config {
 			return ctx.register(this, this.resolveValueString(override.value));
 		}
 
-		return ctx.register(this, this.defaultValue(ctx) || !!this.selector(ctx));
+		var dflt = this.defaultValue(ctx);
+		if (dflt !== undefined) {
+			return ctx.register(this, dflt);
+		}
+
+		if (this.type === "bool" || this.type === "tristate") {
+			var selected = !!this.selector(ctx);
+			if (selected) {
+				return ctx.register(this, selected);
+			}
+
+			if (this.entries[0].scope instanceof ChoiceScope && this.entries[0].scope.choice.chosen(ctx) === this) {
+				return true;
+			}
+		}
+
+		return ctx.register(this, this.falseValue(ctx));
 	}
 
 	symbolKind(): vscode.SymbolKind {
@@ -454,6 +492,27 @@ export class Config {
 
 	toString(): string {
 		return `Config(${this.name})`;
+	}
+}
+
+export class ChoiceEntry extends ConfigEntry {
+	choices: Config[];
+
+	constructor(name: string, line: number, repo: Repository, file: ParsedFile, scope?: Scope) {
+		super(new Config(name, 'choice', repo), line, file, scope);
+		this.choices = [];
+	}
+
+	chosen(ctx: EvalContext): Config | undefined {
+		var c = this.choices.find(c => ctx.overrides.some(o => o.config === c && c.resolveValueString(o.value)));
+		if (c) {
+			return c;
+		}
+
+		var dflt = this.defaults.find(d => !d.condition || d.condition.solve(ctx));
+		if (dflt) {
+			return this.choices.find(c => c.name === dflt!.value.trim());
+		}
 	}
 }
 

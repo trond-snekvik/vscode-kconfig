@@ -186,19 +186,19 @@ export function tokenizeExpression(expr: string): Token[] {
 
 		var string = expr.match(/^(?:""|"(.*?[^\\])")/);
 		if (string) {
-			tokens.push({ kind: TokenKind.STRING, value: string[1] });
+			tokens.push({ kind: TokenKind.STRING, value: string[1] ?? '' });
 			expr = expr.slice(string[0].length);
 			continue;
 		}
 
-		var number = expr.match(/^(?:0x[\da-fA-F]+|\d+)/);
+		var number = expr.match(/^(?:0x[\da-fA-F]+|[\-+]?\d+)/);
 		if (number) {
 			tokens.push({ kind: TokenKind.NUMBER, value: number[0] });
 			expr = expr.slice(number[0].length);
 			continue;
 		}
 
-		var variable = expr.match(/^\w[\w\d_]+/);
+		var variable = expr.match(/^\w+/);
 		if (variable) {
 			tokens.push({ kind: TokenKind.VAR, value: variable[0] });
 			expr = expr.slice(variable[0].length);

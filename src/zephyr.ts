@@ -45,20 +45,7 @@ export function getKconfigRoots() {
 		.filter(file => fs.existsSync(file));
 }
 
-/*
-	"kconfig.env": {
-		"ARCH": "arm",
-		"BOARD": "nrf52_pca10040",
-		"BOARD_DIR": "${workspaceFolder:zephyr}/boards/${ARCH}/${BOARD}",
-		"ARCH_DIR": "arch",
-		"SOC_DIR": "soc",
-		"CMAKE_BINARY_DIR": "${workspaceFolder:nrf}/samples/bluetooth/mesh/light/build"
-	},
-	"kconfig.conf_files": [
-		"${BOARD_DIR}/${BOARD}_defconfig"
-	],
-	"kconfig.root": "${workspaceFolder:zephyr}/Kconfig",
-*/
+var toolchain_kconfig_dir: string;
 
 export function getConfig(name: string) {
 	var root = zephyrRoot();
@@ -74,7 +61,8 @@ export function getConfig(name: string) {
 				BOARD_DIR: board.dir,
 				ARCH_DIR: "arch",
 				SOC_DIR: "soc",
-				CMAKE_BINARY_DIR: "zephyr:/binary.dir"
+				CMAKE_BINARY_DIR: "zephyr:/binary.dir",
+				TOOLCHAIN_KCONFIG_DIR: toolchain_kconfig_dir,
 			};
 		case 'conf_files':
 			return [`${board.dir}/${board.board}_defconfig`];
@@ -177,6 +165,23 @@ export function activate() {
 			selectBoard();
 		});
 		boardStatus.show();
+
+		if (process.env['ZEPHYR_SDK_INSTALL_DIR']) {
+			var toolchain_dir = `${zephyrRoot()}/cmake/toolchain/zephyr`;
+			var toolchains = glob.sync('*.*/generic.cmake', {cwd: toolchain_dir}).map(g => g.replace(/\/.*/, ''));
+			if (toolchains.length > 0) {
+				toolchain_kconfig_dir = toolchain_dir + '/' + toolchains[toolchains.length - 1];
+			}
+		}
+
+		if (!toolchain_kconfig_dir) {
+			if (process.env['TOOLCHAIN_KCONFIG_DIR']) {
+				toolchain_kconfig_dir = process.env['TOOLCHAIN_KCONFIG_DIR'];
+			} else {
+				var toolchain_root = process.env['TOOLCHAIN_ROOT'] ?? zephyrRoot();
+				toolchain_kconfig_dir = `${toolchain_root}/cmake/toolchain/${process.env['ZEPHYR_TOOLCHAIN_VARIANT'] ?? 'gnuarmemb'}`;
+			}
+		}
 
 		var provider = new DocumentProvider();
 

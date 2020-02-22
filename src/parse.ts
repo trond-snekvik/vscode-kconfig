@@ -35,10 +35,13 @@ export class ParsedFile {
 
 	match(other: ParsedFile) : boolean {
 		var myEnvKeys = Object.keys(this.env);
-		return (Object.keys(other.env).length === myEnvKeys.length) &&
-			myEnvKeys.every(key => key in other.env && (other.env[key] === this.env[key])) &&
-			((this.scope === other.scope) || (!!this.scope && !!other.scope?.match(this.scope))) &&
-	 		((this.parent === other.parent) || (!!this.parent && !!other.parent?.match(this.parent)));
+		return (
+			this.uri.fsPath === other.uri.fsPath &&
+			Object.keys(other.env).length === myEnvKeys.length &&
+			myEnvKeys.every(key => key in other.env && other.env[key] === this.env[key]) &&
+			(this.scope === other.scope || (!!this.scope && !!other.scope?.match(this.scope))) &&
+			(this.parent === other.parent || (!!this.parent && !!other.parent?.match(this.parent)))
+		);
 	}
 
 	get links(): vscode.DocumentLink[] {
@@ -69,14 +72,8 @@ export class ParsedFile {
 				existingIndex = oldInclusions.findIndex(ii => ii.file.match(i.file));
 			}
 
-			var existingInclusion: FileInclusion | undefined;
-
 			if (existingIndex > -1) {
-				existingInclusion = oldInclusions.splice(existingIndex, 1)[0];
-			}
-
-			if (existingInclusion) {
-				i.file = existingInclusion.file;
+				i.file = oldInclusions.splice(existingIndex, 1)[0].file;
 			} else {
 				i.file.parse();
 			}
@@ -87,17 +84,18 @@ export class ParsedFile {
 	}
 
 	wipeEntries() {
-		this.entries.forEach(e => {
+		this.entries.splice(0).forEach(e => {
 			e.config.removeEntry(e);
-			e.config.entries = e.config.entries.filter(entry => entry !== e); // TODO: Could be optimized by creating a list of affected configurations?
 		});
-		this.entries = [];
 	}
 
 	delete() {
 		this.wipeEntries();
+		if (this.scope) {
+			this.scope.children = this.scope.children.filter(c => c.file !== this);
+		}
 
-		this.inclusions.forEach(i => i.file.delete());
+		this.inclusions.splice(0).forEach(i => i.file.delete());
 	}
 
 	reset() {
@@ -135,6 +133,14 @@ export class ParsedFile {
 			return;
 		}
 
+		var setScope = (s?: Scope) => {
+			if (s && scope) {
+				scope = scope.addScope(s);
+			} else {
+				scope = s;
+			}
+		};
+
 		const configMatch    = /^\s*(menuconfig|config)\s+(\w+)/;
 		const sourceMatch    = /^\s*(source|rsource|osource)\s+"((?:.*?[^\\])?)"/;
 		const choiceMatch    = /^\s*choice(?:\s+(\w+))?/;
@@ -150,6 +156,7 @@ export class ParsedFile {
 		const promptMatch    = /^\s*prompt\s+"((?:.*?[^\\])?)"/;
 		const helpMatch      = /^\s*help\b/;
 		const defaultMatch   = /^\s*default\s+([^#]+)/;
+		const visibleMatch   = /^\s*visible\s+if\s+([^#]+)/;
 		const defMatch       = /^\s*def_(bool|tristate|int|hex)\s+([^#]+)/;
 		const defStringMatch = /^\s*def_string\s+"((?:.*?[^\\])?)"(?:\s+if\s+([^#]+))?/;
 		const rangeMatch     = /^\s*range\s+([\-+]?\w+)\s+([\-+]?\w+)(?:\s+if\s+([^#]+))?/;
@@ -243,7 +250,7 @@ export class ParsedFile {
 			if (match) {
 				name = match[1] || `<choice @ ${vscode.workspace.asRelativePath(this.uri.fsPath)}:${lineNumber}>`;
 				choice = new ChoiceEntry(name, lineNumber, this.repo, this, scope);
-				scope = new ChoiceScope(choice);
+				setScope(new ChoiceScope(choice));
 				entry = choice;
 				continue;
 			}
@@ -262,7 +269,7 @@ export class ParsedFile {
 			match = line.match(ifMatch);
 			if (match) {
 				entry = null;
-				scope = new IfScope(match[1], lineNumber, this, scope);
+				setScope(new IfScope(match[1], this.repo, lineNumber, this, scope));
 				continue;
 			}
 			match = line.match(endifMatch);
@@ -279,7 +286,7 @@ export class ParsedFile {
 			match = line.match(menuMatch);
 			if (match) {
 				entry = null;
-				scope = new MenuScope(match[2], lineNumber, this, scope);
+				setScope(new MenuScope(match[2], this.repo, lineNumber, this, scope));
 				continue;
 			}
 			match = line.match(endMenuMatch);
@@ -287,7 +294,7 @@ export class ParsedFile {
 				entry = null;
 				if (scope instanceof MenuScope) {
 					scope.lines.end = lineNumber;
-					scope = scope?.parent;
+					scope = scope.parent;
 				} else {
 					this.diags.push(new vscode.Diagnostic(lineRange, `Unexpected endmenu`, vscode.DiagnosticSeverity.Error));
 				}
@@ -314,6 +321,16 @@ export class ParsedFile {
 			match = line.match(envMatch);
 			if (match) {
 				env[match[1]] = match[2];
+				continue;
+			}
+
+			match = line.match(visibleMatch);
+			if (match) {
+				if (scope instanceof MenuScope && !entry) {
+					scope.visible = createExpression(match[1]);
+				} else {
+					this.diags.push(new vscode.Diagnostic(lineRange, `Only valid for menus`, vscode.DiagnosticSeverity.Error));
+				}
 				continue;
 			}
 

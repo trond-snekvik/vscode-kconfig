@@ -3,7 +3,7 @@
 import * as vscode from 'vscode';
 import * as fuzzy from "fuzzysort";
 import { Operator } from './evaluate';
-import { Config, ConfigOverride, ConfigEntry, Repository, IfScope } from "./kconfig";
+import { Config, ConfigOverride, ConfigEntry, Repository, IfScope, Scope } from "./kconfig";
 import * as kEnv from './env';
 import * as zephyr from './zephyr';
 import { PropFile } from './propfile';
@@ -422,74 +422,50 @@ class KconfigLangHandler
 		}
 	}
 
-	provideDocumentSymbols(document: vscode.TextDocument,
-		token: vscode.CancellationToken): vscode.ProviderResult<vscode.DocumentSymbol[]> {
-
+	provideDocumentSymbols(document: vscode.TextDocument, token: vscode.CancellationToken): vscode.ProviderResult<vscode.DocumentSymbol[]> {
 		var file = this.repo.files.find(f => f.uri.fsPath === document.uri.fsPath);
 		if (!file) {
 			return [];
 		}
 
-		var entries: ConfigEntry[] = file.entries;
-		var scopes: { [id: string]: vscode.DocumentSymbol } = {};
-		var topLevelSymbols: vscode.DocumentSymbol[] = [];
-
-		function addToList(list: vscode.DocumentSymbol[], child: vscode.DocumentSymbol) {
-			var existing = list.find(c => c.name === child.name);
-			if (existing) {
-				existing.children.push(...child.children.filter(c => !existing!.children.includes(c)));
-				existing.range = existing.range.union(child.range);
-			} else {
-				list.push(child);
-			}
-		}
-
-		entries.forEach(e => {
-			if (token.isCancellationRequested) {
-				return;
+		var addScope = (scope: Scope): vscode.DocumentSymbol => {
+			var name: string = scope.name;
+			if ((scope instanceof IfScope) && (scope.expr?.operator === Operator.VAR)) {
+				var config = this.repo.configs[scope.expr.var!.value];
+				name = config?.text ?? config?.name ?? scope.name;
 			}
 
-			var rootParent = e.file.scope;
+			var symbol = new vscode.DocumentSymbol(name, '',
+				scope.symbolKind,
+				scope.range,
+				new vscode.Range(scope.lines.start, 0, scope.lines.start, 9999));
 
-			var symbol = new vscode.DocumentSymbol(e.config.text ?? e.config.name,
-				e.config.text ? '' : e.config.name,
-				e.config.symbolKind(),
-				new vscode.Range(e.lines.start, 0, e.lines.end, 9999),
-				new vscode.Range(e.lines.start, 0, e.lines.start, 9999));
-
-			var scope = e.scope;
-			if (!scope || scope.id === rootParent?.id) {
-				topLevelSymbols.push(symbol);
-				return;
-			}
-
-			var child = symbol;
-			while (scope && scope.id !== rootParent?.id) {
-				symbol = scopes[scope.id];
-				if (!symbol) {
-					var name: string = scope.name;
-					if ((scope instanceof IfScope) && (scope.expr?.operator === Operator.VAR)) {
-						var config = this.repo.configs[scope.expr.var!.value];
-						name = config?.text ?? config?.name ?? scope.name;
-					}
-
-					symbol = new vscode.DocumentSymbol(name, '',
-						scope.symbolKind,
-						scope.range,
-						new vscode.Range(scope.lines.start, 0, scope.lines.start, 9999));
-					scopes[scope.id] = symbol;
+			symbol.children = scope.children.filter(c => c.file === file)
+			.map(c =>
+				(c instanceof Scope)
+					? addScope(c)
+					: new vscode.DocumentSymbol(
+							c.config.text ?? c.config.name,
+							c.config.text ? "" : c.config.name,
+							c.config.symbolKind(),
+							new vscode.Range(c.lines.start, 0, c.lines.end, 9999),
+							new vscode.Range(c.lines.start, 0, c.lines.start, 9999)
+					  )
+			)
+			.reduce((prev, curr) => {
+				if (prev.length > 0 && curr.name === prev[prev.length - 1].name) {
+					prev[prev.length - 1].children.push(...curr.children);
+					prev[prev.length - 1].range = prev[prev.length - 1].range.union(curr.range);
+					return prev;
 				}
+				return [...prev, curr];
+			}, new Array<vscode.DocumentSymbol>());
 
-				addToList(symbol.children, child);
+			return symbol;
+		};
 
-				child = symbol;
-				scope = scope.parent;
-			}
-
-			addToList(topLevelSymbols, child);
-		});
-
-		return topLevelSymbols;
+		var root = (file.scope ?? this.repo.rootScope);
+		return root ? addScope(root).children : [];
 	}
 
 	provideWorkspaceSymbols(query: string, token: vscode.CancellationToken): vscode.ProviderResult<vscode.SymbolInformation[]> {

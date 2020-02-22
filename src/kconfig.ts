@@ -34,25 +34,43 @@ export class EvalContext {
 	}
 }
 
+
 export abstract class Scope {
 	lines: LineRange;
 	name: string;
 	file: ParsedFile;
 	parent?: Scope;
+	children: (Scope | ConfigEntry)[];
 	id: string;
 	symbolKind: vscode.SymbolKind;
 
-	constructor(type: string, name: string, line: number, file: ParsedFile, symbolKind: vscode.SymbolKind, parent?: Scope) {
+	constructor(type: string, name: string, repo: Repository, line: number, file: ParsedFile, symbolKind: vscode.SymbolKind, parent?: Scope) {
 		this.name = name;
 		this.lines = {start: line, end: line};
 		this.file = file;
 		this.parent = parent;
 		this.id = type + '(' + name + ')';
 		this.symbolKind = symbolKind;
+		this.children = [];
 
 		if (parent) {
 			this.id = parent.id + '::' + this.id;
+		} else if (!repo.rootScope) {
+			repo.rootScope = this;
+		} else {
+			console.log(`Multiple root scopes: ${this.id} and ${repo.rootScope.id}`);
 		}
+	}
+
+	addScope(s: Scope): Scope {
+		var existing = this.children.find(c => (c instanceof Scope) && c.id === s.id && c.file === s.file) as Scope;
+		if (existing) {
+			existing.lines = s.lines;
+			return existing;
+		}
+
+		this.children.push(s);
+		return s;
 	}
 
 	get range(): vscode.Range {
@@ -72,8 +90,8 @@ export abstract class Scope {
 
 export class IfScope extends Scope {
 	expr?: Expression;
-	constructor(expression: string, line: number, file: ParsedFile, parent?: Scope) {
-		super('if', expression, line, file, vscode.SymbolKind.Interface, parent);
+	constructor(expression: string, repo: Repository, line: number, file: ParsedFile, parent?: Scope) {
+		super('if', expression, repo, line, file, vscode.SymbolKind.Interface, parent);
 		/* Creating the expression now incurs a 30% performance penalty on parsing,
 		 * but makes config file evaluation MUCH faster */
 		this.expr = createExpression(expression);
@@ -86,8 +104,10 @@ export class IfScope extends Scope {
 
 export class MenuScope extends Scope {
 	dependencies: string[];
-	constructor(prompt: string, line: number, file: ParsedFile, parent?: Scope) {
-		super('menu', prompt, line, file, vscode.SymbolKind.Class, parent);
+	visible?: Expression;
+
+	constructor(prompt: string, repo: Repository, line: number, file: ParsedFile, parent?: Scope) {
+		super('menu', prompt, repo, line, file, vscode.SymbolKind.Class, parent);
 		this.dependencies = [];
 	}
 
@@ -99,7 +119,7 @@ export class MenuScope extends Scope {
 export class ChoiceScope extends Scope {
 	choice: ChoiceEntry;
 	constructor(choice: ChoiceEntry) {
-		super('choice', choice.config.name, choice.lines.start, choice.file, vscode.SymbolKind.Enum, choice.scope);
+		super('choice', choice.config.name, choice.config.repo, choice.lines.start, choice.file, vscode.SymbolKind.Enum, choice.scope);
 		this.choice = choice;
 	}
 
@@ -140,6 +160,10 @@ export class ConfigEntry {
 		this.implys = [];
 		this.defaults = [];
 		this.prompt = false;
+
+		if (scope) {
+			scope.children.push(this);
+		}
 
 		this.config.entries.push(this);
 	}
@@ -207,6 +231,10 @@ export class Config {
 		return implys;
 	}
 
+	get mainEntry(): ConfigEntry | undefined {
+		return this.entries.find(e => e.text);
+	}
+
 	activeEntries(ctx: EvalContext): ConfigEntry[] {
 		return this.entries.filter(e => e.isActive(ctx));
 	}
@@ -254,6 +282,10 @@ export class Config {
 	removeEntry(entry: ConfigEntry) {
 		var i = this.entries.indexOf(entry);
 		this.entries.splice(i, 1);
+		if (entry.scope) {
+			i = entry.scope.children.indexOf(entry);
+			entry.scope.children.splice(i, 1);
+		}
 
 		if (this.entries.length === 0) {
 			delete this.repo.configs[this.name];
@@ -519,13 +551,13 @@ export class ChoiceEntry extends ConfigEntry {
 export class Repository {
 	configs: {[name: string]: Config};
 	root?: ParsedFile;
+	rootScope?: Scope;
 	diags: vscode.DiagnosticCollection;
 	openEditors: vscode.Uri[];
 
 	constructor(diags: vscode.DiagnosticCollection) {
 		this.configs = {};
 		this.diags = diags;
-
 		this.openEditors = vscode.window.visibleTextEditors.filter(e => e.document.languageId === "kconfig").map(e => e.document.uri);
 		this.openEditors.forEach(uri => this.setDiags(uri));
 
@@ -550,6 +582,7 @@ export class Repository {
 	parse() {
 		this.root?.parse();
 		this.openEditors.forEach(uri => this.setDiags(uri));
+		this.printStats();
 	}
 
 	reset() {
@@ -588,10 +621,24 @@ export class Repository {
 		hrTime = process.hrtime(hrTime);
 
 		this.openEditors.forEach(uri => this.setDiags(uri));
-
 		console.log(`Handled changes to ${files.length} versions of ${uri.fsPath} in ${hrTime[0] * 1000 + hrTime[1] / 1000000} ms.`);
+		this.printStats();
+	}
+
+	printStats() {
 		console.log(`\tFiles: ${this.files.length}`);
 		console.log(`\tConfigs: ${Object.values(this.configs).length}`);
 		console.log(`\tEmpty configs: ${Object.values(this.configs).filter(c => c.entries.length === 0).length}`);
+		var entriesC = Object.values(this.configs).map(c => c.entries).reduce((sum, num) => [...sum, ...num], []);
+		console.log(`\tEntries: ${entriesC.length}`);
+
+		var scopeEntries = (s: Scope) : ConfigEntry[] => {
+			return s.children.map(c => (c instanceof Scope) ? scopeEntries(c) : (c.config.kind === 'choice') ? [] : [c]).reduce((sum, num) => [...sum, ...num], []);
+		};
+		var entriesS = this.rootScope ? scopeEntries(this.rootScope) : [];
+		console.log(`\tEntries from scopes: ${entriesS.length}`);
+
+		console.log(`\tMissing Scope entries: ${entriesC.filter(e => !entriesS.includes(e)).map(e => e.config.name)}`);
+		console.log(`\tMissing Config entries: ${entriesS.filter(e => !entriesC.includes(e)).map(e => e.config.name)}`);
 	}
 }

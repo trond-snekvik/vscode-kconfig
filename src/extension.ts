@@ -3,7 +3,7 @@
 import * as vscode from 'vscode';
 import * as fuzzy from "fuzzysort";
 import { Operator } from './evaluate';
-import { Config, ConfigOverride, ConfigEntry, Repository, IfScope, Scope } from "./kconfig";
+import { Config, ConfigOverride, ConfigEntry, Repository, IfScope, Scope, Comment } from "./kconfig";
 import * as kEnv from './env';
 import * as zephyr from './zephyr';
 import { PropFile } from './propfile';
@@ -24,7 +24,7 @@ class KconfigLangHandler
 	operatorCompletions: vscode.CompletionItem[];
 	repo: Repository;
 	conf: ConfigOverride[];
-
+	propfileRefreshTimer?: NodeJS.Timeout;
 	constructor() {
 		this.operatorCompletions = [
 			new vscode.CompletionItem('if', vscode.CompletionItemKind.Keyword),
@@ -85,9 +85,23 @@ class KconfigLangHandler
 		watcher.onDidChange(uri => {
 			if (!vscode.workspace.textDocuments.some(d => d.uri.fsPath === uri.fsPath)) {
 				this.repo.onDidChange(uri);
+
+				if (this.propfileRefreshTimer) {
+					clearTimeout(this.propfileRefreshTimer);
+				}
+
+				this.propfileRefreshTimer = setTimeout(() => this.refreshOpenPropfiles(), 1000);
 			}
 		});
 		context.subscriptions.push(watcher);
+
+		disposable = vscode.window.onDidChangeActiveTextEditor(e => {
+			if (e?.document.languageId === 'properties') {
+				var file = this.propFile(e.document.uri);
+				file.reparse(e.document);
+			}
+		});
+		context.subscriptions.push(disposable);
 
 		disposable = vscode.workspace.onDidSaveTextDocument(d => {
 			if (d.languageId === 'properties') {
@@ -147,6 +161,12 @@ class KconfigLangHandler
 		return this.doScan();
 	}
 
+	refreshOpenPropfiles() {
+		vscode.window.visibleTextEditors
+			.filter(e => e.document.languageId === 'properties')
+			.forEach(e => this.propFile(e.document.uri).reparse(e.document));
+	}
+
 	doScan() {
 		var hrTime = process.hrtime();
 
@@ -160,9 +180,7 @@ class KconfigLangHandler
 
 		this.conf = this.loadConfOptions();
 
-		vscode.window.visibleTextEditors
-			.filter(e => e.document.languageId === 'properties')
-			.forEach(e => this.propFile(e.document.uri).onOpen(e.document));
+		this.refreshOpenPropfiles();
 
 		var time_ms = Math.round(hrTime[0] * 1000 + hrTime[1] / 1000000);
 		vscode.window.setStatusBarMessage(`Kconfig: ${Object.keys(this.repo.configs).length} entries, ${time_ms} ms`, 5000);
@@ -355,7 +373,7 @@ class KconfigLangHandler
 			items.push(new vscode.CompletionItem('if', vscode.CompletionItemKind.Keyword));
 		}
 
-		return { isIncomplete: (count > maxCount), items: items };
+		return { isIncomplete: (count >= maxCount), items: items };
 	}
 
 	resolveCompletionItem(item: vscode.CompletionItem, token: vscode.CancellationToken): vscode.ProviderResult<vscode.CompletionItem> {

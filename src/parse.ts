@@ -473,11 +473,12 @@ export class ParsedFile {
 				continue;
 			}
 
-			if (line.match(/^\s*comment\s+".*"/)) {
-				continue;
-			}
-
-			if (line.match(/^\s*optional/)) {
+			if (line.match(/^\s*optional\b/)) {
+				if (entry instanceof ChoiceEntry) {
+					entry.optional = true;
+				} else {
+					this.diags.push(new vscode.Diagnostic(lineRange, `Unexpected keyword, optional is only valid for choices.`, vscode.DiagnosticSeverity.Error));
+				}
 				continue;
 			}
 

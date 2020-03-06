@@ -541,6 +541,7 @@ export class Config {
 
 export class ChoiceEntry extends ConfigEntry {
 	choices: Config[];
+	optional = false;
 
 	constructor(name: string, line: number, repo: Repository, file: ParsedFile, scope?: Scope) {
 		super(new Config(name, 'choice', repo), line, file, scope);
@@ -556,6 +557,10 @@ export class ChoiceEntry extends ConfigEntry {
 		var dflt = this.defaults.find(d => !d.condition || d.condition.solve(ctx));
 		if (dflt) {
 			return this.choices.find(c => c.name === dflt!.value.trim());
+		}
+
+		if (!this.optional && this.choices.length > 0) {
+			return this.choices[0];
 		}
 	}
 }

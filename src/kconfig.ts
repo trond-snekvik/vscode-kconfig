@@ -34,13 +34,25 @@ export class EvalContext {
 	}
 }
 
+export class Comment {
+	visible?: Expression;
+	file: ParsedFile;
+	text: string;
+	line: number;
+
+	constructor(text: string, file: ParsedFile, line: number) {
+		this.text = text;
+		this.file = file;
+		this.line = line;
+	}
+}
 
 export abstract class Scope {
 	lines: LineRange;
 	name: string;
 	file: ParsedFile;
 	parent?: Scope;
-	children: (Scope | ConfigEntry)[];
+	children: (Scope | ConfigEntry | Comment)[];
 	id: string;
 	symbolKind: vscode.SymbolKind;
 
@@ -633,7 +645,7 @@ export class Repository {
 		console.log(`\tEntries: ${entriesC.length}`);
 
 		var scopeEntries = (s: Scope) : ConfigEntry[] => {
-			return s.children.map(c => (c instanceof Scope) ? scopeEntries(c) : (c.config.kind === 'choice') ? [] : [c]).reduce((sum, num) => [...sum, ...num], []);
+			return s.children.map(c => (c instanceof Comment) ? [] : (c instanceof Scope) ? scopeEntries(c) : (c.config.kind === 'choice') ? [] : [c]).reduce((sum, num) => [...sum, ...num], []);
 		};
 		var entriesS = this.rootScope ? scopeEntries(this.rootScope) : [];
 		console.log(`\tEntries from scopes: ${entriesS.length}`);

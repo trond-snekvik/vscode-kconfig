@@ -162,6 +162,7 @@ export class ParsedFile {
 		const rangeMatch     = /^\s*range\s+([\-+]?\w+)\s+([\-+]?\w+)(?:\s+if\s+([^#]+))?/;
 
 		var entry: ConfigEntry | null = null;
+		var comment: Comment | null = null;
 		var help = false;
 		var helpIndent: string | null = null;
 		for (var lineNumber = 0; lineNumber < lines.length; lineNumber++) {
@@ -330,6 +331,14 @@ export class ParsedFile {
 					scope.visible = createExpression(match[1]);
 				} else {
 					this.diags.push(new vscode.Diagnostic(lineRange, `Only valid for menus`, vscode.DiagnosticSeverity.Error));
+				}
+				continue;
+			}
+			match = line.match(/^\s*comment\s+"(.*)"/);
+			if (match) {
+				comment = new Comment(match[1], this, lineNumber);
+				if (scope) {
+					scope.children.push(comment);
 				}
 				continue;
 			}

@@ -458,7 +458,7 @@ class KconfigLangHandler
 				scope.range,
 				new vscode.Range(scope.lines.start, 0, scope.lines.start, 9999));
 
-			symbol.children = scope.children.filter(c => c.file === file)
+			symbol.children = (scope.children.filter(c => !(c instanceof Comment) && c.file === file) as (Scope | ConfigEntry)[])
 			.map(c =>
 				(c instanceof Scope)
 					? addScope(c)

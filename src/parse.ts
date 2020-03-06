@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as glob from "glob";
-import { Repository, Scope, Config, ConfigValueType, ConfigEntry, ConfigKind, IfScope, MenuScope, ChoiceScope, ChoiceEntry } from "./kconfig";
+import { Repository, Scope, Config, ConfigValueType, ConfigEntry, ConfigKind, IfScope, MenuScope, ChoiceScope, ChoiceEntry, Comment } from "./kconfig";
 import * as kEnv from './env';
 import { createExpression } from './evaluate';
 
@@ -189,10 +189,9 @@ export class ParsedFile {
 			}
 
 			if (line.length === 0) {
-				continue;
-			}
-
-			if (line.match(/^\s*#/)) {
+				if (help && entry?.help) {
+					entry.help += '\n\n';
+				}
 				continue;
 			}
 
@@ -215,7 +214,12 @@ export class ParsedFile {
 					}
 				}
 			}
+
 			if (help) {
+				continue;
+			}
+
+			if (line.match(/^\s*(#|$)/)) {
 				continue;
 			}
 

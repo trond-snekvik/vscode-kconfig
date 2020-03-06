@@ -214,7 +214,7 @@ export class PropFile {
 				if (c.value === 'n') {
 					diag = new vscode.Diagnostic(line,
 						`Entry is already disabled by dependency: ${missingDependency}`,
-						vscode.DiagnosticSeverity.Warning);
+						vscode.DiagnosticSeverity.Hint);
 					diag.tags = [vscode.DiagnosticTag.Unnecessary];
 
 					addRedundancyAction(c, diag);

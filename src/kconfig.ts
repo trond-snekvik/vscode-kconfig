@@ -24,13 +24,13 @@ export class EvalContext {
 
 	/* Cache results: */
 
-	register(c: Config, value: ConfigValue): ConfigValue {
-		this.evaluated[c.name] = value;
+	register(c: Config | Scope, value: ConfigValue): ConfigValue {
+		this.evaluated[(c instanceof Config) ? c.name : c.id] = value;
 		return value;
 	}
 
-	resolve(c: Config): ConfigValue | undefined {
-		return this.evaluated[c.name];
+	resolve(c: Config | Scope): ConfigValue | undefined {
+		return this.evaluated[(c instanceof Config) ? c.name : c.id];
 	}
 }
 
@@ -94,7 +94,14 @@ export abstract class Scope {
 	}
 
 	evaluate(ctx: EvalContext): boolean {
-		return this.resolve(ctx) && (this.parent?.evaluate(ctx) ?? true);
+		var result = ctx.resolve(this);
+		if (result !== undefined) {
+			return !!result;
+		}
+
+		result = this.resolve(ctx) && (this.parent?.evaluate(ctx) ?? true);
+		ctx.register(this, result);
+		return result;
 	}
 
 	protected abstract resolve(ctx: EvalContext): boolean;
@@ -288,7 +295,7 @@ export class Config {
 	}
 
 	hasDependency(name: string) {
-		return this.entries.some(e => e.dependencies.some(s => s === name));
+		return this.entries.some(e => e.dependencies.some(s => s.includes(name)));
 	}
 
 	removeEntry(entry: ConfigEntry) {

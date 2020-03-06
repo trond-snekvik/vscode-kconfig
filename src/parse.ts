@@ -141,6 +141,19 @@ export class ParsedFile {
 			}
 		};
 
+		var unterminatedScope = (s?: Scope) => {
+			if (s) {
+				var type = s.id.split('(')[0];
+				this.diags.push(
+					new vscode.Diagnostic(
+						new vscode.Range(s.lines.start, 0, s.lines.start, 9999),
+						`Unterminated ${type}. Expected matching end${type} before end of parent scope.`,
+						vscode.DiagnosticSeverity.Error
+					)
+				);
+			}
+		};
+
 		const configMatch    = /^\s*(menuconfig|config)\s+(\w+)/;
 		const sourceMatch    = /^\s*(source|rsource|osource)\s+"((?:.*?[^\\])?)"/;
 		const choiceMatch    = /^\s*choice(?:\s+(\w+))?/;
@@ -264,6 +277,7 @@ export class ParsedFile {
 					scope = scope.parent;
 				} else {
 					this.diags.push(new vscode.Diagnostic(lineRange, `Unexpected endchoice`, vscode.DiagnosticSeverity.Error));
+					unterminatedScope(scope);
 				}
 				continue;
 			}
@@ -281,6 +295,7 @@ export class ParsedFile {
 					scope = scope.parent;
 				} else {
 					this.diags.push(new vscode.Diagnostic(lineRange, `Unexpected endif`, vscode.DiagnosticSeverity.Error));
+					unterminatedScope(scope);
 				}
 				continue;
 			}
@@ -298,6 +313,7 @@ export class ParsedFile {
 					scope = scope.parent;
 				} else {
 					this.diags.push(new vscode.Diagnostic(lineRange, `Unexpected endmenu`, vscode.DiagnosticSeverity.Error));
+					unterminatedScope(scope);
 				}
 				continue;
 			}
@@ -315,6 +331,7 @@ export class ParsedFile {
 					scope.dependencies.push(depOn);
 				} else {
 					this.diags.push(new vscode.Diagnostic(lineRange, `Unexpected depends on`, vscode.DiagnosticSeverity.Error));
+					unterminatedScope(scope);
 				}
 				continue;
 			}

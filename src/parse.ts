@@ -60,6 +60,10 @@ export class ParsedFile {
 
 		var oldInclusions = this.inclusions;
 
+		if (this.scope) {
+			this.scope.children = this.scope.children.filter(c => !(c instanceof Scope) || (c.file !== this));
+		}
+
 		this.wipeEntries();
 
 		this.parseRaw(change ? change.document.getText() : kEnv.readFile(this.uri));

@@ -63,6 +63,7 @@ class KconfigLangHandler
 		this.propFiles = {};
 		this.diags = vscode.languages.createDiagnosticCollection('kconfig');
 		this.repo = new Repository(this.diags);
+		zephyr.setRepo(this.repo);
 		this.conf = [];
 	}
 

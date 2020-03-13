@@ -4,6 +4,7 @@ import { execSync, exec, ExecException } from 'child_process';
 import * as yaml from 'yaml';
 import * as kEnv from './env';
 import * as glob from 'glob';
+import { Repository } from './kconfig';
 
 const MODULE_FILE = vscode.Uri.parse('zephyr:/binary.dir/Kconfig.modules');
 export var isZephyr: boolean;
@@ -191,4 +192,42 @@ export function activate() {
 	} else if (hasWestYml) {
 		vscode.window.showWarningMessage(`Found west.yml, but failed calling west. Is west initialized?`);
 	}
+}
+
+var manifestWatcher: vscode.FileSystemWatcher;
+
+export function setRepo(repo: Repository) {
+	west(['topdir'], (err, out) => {
+		if (!err) {
+			var conf = out.trim() + '/.west/config';
+
+			var setupManifestWatcher = () => {
+				fs.readFile(conf, (e, data) => {
+					var lines = data.toString('utf-8').split(/\r?\n/);
+					var manifestIndex = lines.findIndex(l => l.includes('[manifest]'));
+					if (manifestIndex < 0 && manifestIndex >= lines.length - 1) {
+						return;
+					}
+
+					var pathLine = lines.slice(manifestIndex + 1).find(l => l.includes('path ='));
+					var westManifest = out.trim() + '/' + pathLine?.split('=')[1].trim() + '/west.yml';
+					if (manifestWatcher) {
+						manifestWatcher.dispose();
+					}
+					manifestWatcher = vscode.workspace.createFileSystemWatcher(westManifest, true, false, true);
+
+					manifestWatcher.onDidChange(e => {
+						repo.onDidChange(MODULE_FILE);
+					});
+				});
+			}
+
+			vscode.workspace.createFileSystemWatcher(conf, true, false, true).onDidChange(e => {
+				repo.onDidChange(MODULE_FILE);
+				setupManifestWatcher();
+			});
+
+			setupManifestWatcher();
+		}
+	});
 }

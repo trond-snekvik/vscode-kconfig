@@ -139,7 +139,7 @@ class KconfigLangHandler
 		context.subscriptions.push(disposable);
 		disposable = vscode.languages.registerCodeActionsProvider({ language: 'properties', scheme: 'file' }, this);
 		context.subscriptions.push(disposable);
-		disposable = vscode.languages.registerDocumentSymbolProvider({ language: 'kconfig', scheme: 'file' }, this);
+		disposable = vscode.languages.registerDocumentSymbolProvider(selector, this);
 		context.subscriptions.push(disposable);
 		disposable = vscode.languages.registerWorkspaceSymbolProvider(this);
 		context.subscriptions.push(disposable);
@@ -442,6 +442,20 @@ class KconfigLangHandler
 	}
 
 	provideDocumentSymbols(document: vscode.TextDocument, token: vscode.CancellationToken): vscode.ProviderResult<vscode.DocumentSymbol[]> {
+		if (document.languageId === 'properties') {
+			return this.propFile(document.uri)
+				.overrides.filter(o => o.line !== undefined)
+				.map(
+					o =>
+						new vscode.DocumentSymbol(
+							o.config.name,
+							o.config.text ?? "",
+							o.config.symbolKind(),
+							new vscode.Range(o.line!, 0, o.line!, 99999),
+							new vscode.Range(o.line!, 0, o.line!, 99999)
+						)
+				);
+		}
 		var file = this.repo.files.find(f => f.uri.fsPath === document.uri.fsPath);
 		if (!file) {
 			return [];

@@ -137,9 +137,9 @@
 		"@types/mocha": "^2.2.42",
 		"@types/node": "^10.12.21",
 		"@types/yaml": "^1.2.0",
+		"@types/vscode": "^1.45.0",
 		"tslint": "^5.12.1",
-		"typescript": "^3.7.3",
-		"vscode": "^1.1.28"
+		"typescript": "^3.7.3"
 	},
 	"dependencies": {
 		"fuzzysort": "^1.1.4",

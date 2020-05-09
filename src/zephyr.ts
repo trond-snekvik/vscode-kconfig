@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
-import { execSync, exec, ExecException } from 'child_process';
+import { execSync, exec, ExecException, ExecOptions } from 'child_process';
 import * as yaml from 'yaml';
 import * as kEnv from './env';
 import * as glob from 'glob';
@@ -17,13 +17,18 @@ function west(args: string[], callback?: (err: ExecException | null, stdout: str
 	var exe = kEnv.getConfig('zephyr.west') ?? 'west';
 	var command = exe + ' ' + ' ' + args.join(' ');
 
+	const options: ExecOptions = {
+		cwd: vscode.workspace.workspaceFolders?.[0].uri.fsPath,
+		env: process.env
+	};
+
 	if (callback) {
-		exec(command, {cwd: vscode.workspace.workspaceFolders?.[0].uri.fsPath}, callback);
+		exec(command, options, callback);
 	} else {
 		try {
-			return execSync(exe + ' ' + args.join(' '), {cwd: vscode.workspace.workspaceFolders?.[0].uri.fsPath}).toString('utf-8');
+			return execSync(exe + ' ' + args.join(' '), options).toString('utf-8');
 		} catch (e) {
-			return undefined;
+			return e.toString();
 		}
 	}
 }
@@ -155,7 +160,8 @@ class DocumentProvider implements vscode.TextDocumentContentProvider {
 
 export function activate() {
 	var hasWestYml = vscode.workspace.workspaceFolders?.some(f => fs.existsSync(f.uri.fsPath + "/west.yml"));
-	isZephyr = !!(hasWestYml && west(['--help'])?.match('boards:'));
+	var helpOutput = west(['--help']);
+	isZephyr = !!(hasWestYml && helpOutput?.match('boards:'));
 	if (isZephyr) {
 		board = kEnv.getConfig('zephyr.board') || {board: 'nrf52_pca10040', arch: 'arm'};
 		boardStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 2);
@@ -190,7 +196,13 @@ export function activate() {
 
 		kEnv.registerFileProvider('zephyr', provideDoc);
 	} else if (hasWestYml) {
-		vscode.window.showWarningMessage(`Found west.yml, but failed calling west. Is west initialized?`);
+		west([], (err, out) => {
+			if (err) {
+				vscode.window.showErrorMessage('Error calling west. Try configuring kconfig.zephyr.west.\n' + err);
+				return;
+			}
+			vscode.window.showWarningMessage(`Found west.yml, but failed calling west. Is west initialized?`);
+		})
 	}
 }
 

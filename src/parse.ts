@@ -45,7 +45,14 @@ export class ParsedFile {
 	}
 
 	get links(): vscode.DocumentLink[] {
-		return this.inclusions.map(i => new vscode.DocumentLink(i.range, i.file.uri));
+		var thisDir = path.dirname(this.uri.fsPath);
+		return this.inclusions.map(i => {
+			var link = new vscode.DocumentLink(i.range, i.file.uri);
+			if (i.file.uri.scheme === 'file') {
+				link.tooltip = path.relative(thisDir, i.file.uri.fsPath);
+			}
+			return link;
+		});
 	}
 
 	onDidChange(change?: vscode.TextDocumentChangeEvent) {

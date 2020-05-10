@@ -158,6 +158,7 @@ class KconfigLangHandler
 	rescan() {
 		this.propFiles = {};
 		this.diags.clear();
+		this.repo.reset();
 
 		return this.doScan();
 	}

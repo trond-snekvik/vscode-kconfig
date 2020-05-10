@@ -610,10 +610,7 @@ export class Repository {
 	}
 
 	reset() {
-		if (this.root) {
-			this.setRoot(this.root.uri);
-			this.parse();
-		}
+		this.rootScope = undefined;
 	}
 
 	get files(): ParsedFile[] { // TODO: optimize to a managed dict?
@@ -645,8 +642,10 @@ export class Repository {
 		hrTime = process.hrtime(hrTime);
 
 		this.openEditors.forEach(uri => this.setDiags(uri));
-		console.log(`Handled changes to ${files.length} versions of ${uri.fsPath} in ${hrTime[0] * 1000 + hrTime[1] / 1000000} ms.`);
-		this.printStats();
+		if (vscode.debug.activeDebugSession) {
+			console.log(`Handled changes to ${files.length} versions of ${uri.fsPath} in ${hrTime[0] * 1000 + hrTime[1] / 1000000} ms.`);
+			this.printStats();
+		}
 	}
 
 	printStats() {
@@ -662,7 +661,7 @@ export class Repository {
 		var entriesS = this.rootScope ? scopeEntries(this.rootScope) : [];
 		console.log(`\tEntries from scopes: ${entriesS.length}`);
 
-		console.log(`\tMissing Scope entries: ${entriesC.filter(e => !entriesS.includes(e)).map(e => e.config.name)}`);
-		console.log(`\tMissing Config entries: ${entriesS.filter(e => !entriesC.includes(e)).map(e => e.config.name)}`);
+		// console.log(`\tMissing Scope entries: ${entriesC.filter(e => !entriesS.includes(e)).map(e => e.config.name)}`);
+		// console.log(`\tMissing Config entries: ${entriesS.filter(e => !entriesC.includes(e)).map(e => e.config.name)}`);
 	}
 }

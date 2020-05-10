@@ -84,7 +84,8 @@
             "end": "(#|$)",
             "beginCaptures": {"1": {"name": "keyword.control"}},
             "patterns": [
-                {"include": "#string"}
+                {"include": "#string"},
+                {"include": "#if"}
             ]
         }
     ],

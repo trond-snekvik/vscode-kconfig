@@ -516,7 +516,7 @@ class KconfigLangHandler
 
 export async function activate(context: vscode.ExtensionContext) {
 
-	zephyr.activate();
+	await zephyr.activate();
 	kEnv.update();
 
 	if (!kEnv.isActive()) {

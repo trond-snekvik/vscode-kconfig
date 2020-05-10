@@ -8,9 +8,22 @@ import { Repository } from './kconfig';
 
 const MODULE_FILE = vscode.Uri.parse('zephyr:/binary.dir/Kconfig.modules');
 export var isZephyr: boolean;
+var moduleCount = 0;
+var zephyrPath: string | undefined;
 
 function zephyrRoot(): string | undefined {
-	return vscode.workspace.workspaceFolders?.find(f => f.uri.fsPath.endsWith('zephyr'))?.uri.fsPath;
+	return zephyrPath;
+	var zephyr = vscode.workspace.workspaceFolders?.find(f => f.uri.fsPath.endsWith('zephyr'))?.uri.fsPath;
+	if (zephyr) {
+		return zephyr;
+	}
+
+	vscode.workspace.findFiles('.west/config').then(files => {
+		if (files?.length) {
+			var zephyrpath = fs.readFileSync(files[0].fsPath)?.toString('utf-8').match(/\[zephyr\]\s*base\s*=\s*(\w+)/s);
+
+		}
+	});
 }
 
 function west(args: string[], callback?: (err: ExecException | null, stdout: string) => void): string | undefined {
@@ -18,7 +31,7 @@ function west(args: string[], callback?: (err: ExecException | null, stdout: str
 	var command = exe + ' ' + ' ' + args.join(' ');
 
 	const options: ExecOptions = {
-		cwd: vscode.workspace.workspaceFolders?.[0].uri.fsPath,
+		cwd: zephyrRoot() ?? vscode.workspace.workspaceFolders?.[0].uri.fsPath,
 		env: process.env
 	};
 
@@ -31,6 +44,8 @@ function west(args: string[], callback?: (err: ExecException | null, stdout: str
 			return e.toString();
 		}
 	}
+
+	return '';
 }
 
 export function getKconfigRoots() {
@@ -82,51 +97,47 @@ type BoardTuple = {board: string, arch: string, dir: string};
 var board: BoardTuple;
 var boardStatus: vscode.StatusBarItem;
 
-
-export function selectBoard(): Promise<BoardTuple> {
+function setBoard(board: string, arch: string): Promise<BoardTuple> {
 	return new Promise<BoardTuple>((resolve, reject) => {
-		west(['boards', '-f', '"{name}:{arch}"'], (error, stdout) => {
-			if (error) {
+		glob(`**/${board}_defconfig`, { absolute: true, cwd: `${zephyrRoot()}/boards/${arch}`, nounique: true, nodir: true, nobrace: true, nosort: true }, (err, matches) => {
+			if (err || matches.length === 0) {
 				reject();
 				return;
 			}
 
-			vscode.window.showQuickPick(stdout
-				.split(/\r?\n/g)
-				.map(line => line.split(":"))
-				.map(entry => <vscode.QuickPickItem>{label: entry[0], description: entry[1]}),
-				{placeHolder: 'Select a board to use for Kconfig input'}
-			).then(selection => {
-				if (selection) {
-					var board = selection!.label;
-					var arch = selection!.description!;
-					glob(`**/${board}_defconfig`, {absolute: true, cwd: `${zephyrRoot()}/boards/${arch}`}, (err, matches) => {
-						if (err || matches.length === 0) {
-							reject();
-						}
+			var dir = matches[0].slice(0, matches[0].length - `${board}_defconfig`.length - 1);
 
-						var dir = matches[0].slice(0, matches[0].length - `${board}_defconfig`.length - 1);
-
-						resolve({ board: board, arch: arch, dir: dir });
-					});
-				} else {
-					reject();
-				}
-			});
+			resolve({ board: board, arch: arch, dir: dir });
 		});
-	}).then(tuple => {
-		board = tuple;
-		boardStatus.text = `$(tools) ${board.board}`;
-		vscode.workspace
-			.getConfiguration("kconfig")
-			.update("zephyr.board", board, vscode.ConfigurationTarget.Workspace)
-			.then(
-				() => console.log(`Stored new board ${board.board}`),
-				err => console.error(`Failed storing board ${err}`)
-			);
-		return tuple;
-	}, () => {
-		return board;
+	});
+}
+
+export function selectBoard() {
+	west(['boards', '-f', '"{name}:{arch}"'], (error, stdout) => {
+		if (error) {
+			return;
+		}
+
+		vscode.window.showQuickPick(stdout
+			.split(/\r?\n/g)
+			.map(line => line.split(":"))
+			.map(entry => <vscode.QuickPickItem>{label: entry[0], description: entry[1]}),
+			{placeHolder: 'Select a board to use for Kconfig input'}
+		).then(async selection => {
+			if (!selection) {
+				return;
+			}
+
+			board = await setBoard(selection!.label, selection!.description!);
+			boardStatus.text = `$(circuit-board) ${board.board}`;
+			vscode.workspace
+				.getConfiguration("kconfig")
+				.update("zephyr.board", board, vscode.ConfigurationTarget.Workspace)
+				.then(
+					() => console.log(`Stored new board ${board.board}`),
+					err => console.error(`Failed storing board ${err}`)
+				);
+		});
 	});
 }
 
@@ -158,51 +169,83 @@ class DocumentProvider implements vscode.TextDocumentContentProvider {
 	}
 }
 
-export function activate() {
-	var hasWestYml = vscode.workspace.workspaceFolders?.some(f => fs.existsSync(f.uri.fsPath + "/west.yml"));
-	var helpOutput = west(['--help']);
-	isZephyr = !!(hasWestYml && helpOutput?.match('boards:'));
+function activateZephyr() {
+	boardStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 2);
+	boardStatus.text = `$(circuit-board) ${board.board}`;
+	boardStatus.command = 'kconfig.zephyr.setBoard';
+	boardStatus.tooltip = 'Kconfig board';
+	vscode.commands.registerCommand(boardStatus.command, () => {
+		selectBoard();
+	});
+	boardStatus.show();
+
+	if (process.env['ZEPHYR_SDK_INSTALL_DIR']) {
+		var toolchain_dir = `${zephyrRoot()}/cmake/toolchain/zephyr`;
+		var toolchains = glob.sync('*.*/generic.cmake', {cwd: toolchain_dir}).map(g => g.replace(/\/.*/, ''));
+		if (toolchains.length > 0) {
+			toolchain_kconfig_dir = toolchain_dir + '/' + toolchains[toolchains.length - 1];
+		}
+	}
+
+	if (!toolchain_kconfig_dir) {
+		if (process.env['TOOLCHAIN_KCONFIG_DIR']) {
+			toolchain_kconfig_dir = process.env['TOOLCHAIN_KCONFIG_DIR'];
+		} else {
+			var toolchain_root = process.env['TOOLCHAIN_ROOT'] ?? zephyrRoot();
+			toolchain_kconfig_dir = `${toolchain_root}/cmake/toolchain/${process.env['ZEPHYR_TOOLCHAIN_VARIANT'] ?? 'gnuarmemb'}`;
+		}
+	}
+
+	var provider = new DocumentProvider();
+
+	vscode.workspace.registerTextDocumentContentProvider('zephyr', provider);
+
+	kEnv.registerFileProvider('zephyr', provideDoc);
+}
+
+async function checkIsZephyr() {
+	var hasWestYml = vscode.workspace.workspaceFolders?.some(f => fs.existsSync(f.uri.fsPath + "/west.yml") || fs.existsSync(f.uri.fsPath + "/.west/config"));
+	if (!hasWestYml) {
+		return false;
+	}
+
+	var manifest = west(['config', 'manifest.path']);
+	if (manifest) {
+		var root = west(['topdir']);
+		if (root) {
+			zephyrPath = root.trim() + '/' + manifest.trim();
+		}
+	}
+
+	if (!zephyrPath) {
+		return false;
+	}
+
+	board = kEnv.getConfig('zephyr.board');
+	if (board?.board && board?.arch) {
+		if (!board.dir) {
+			board = await setBoard(board.board, board.arch).catch(() => Promise.resolve(board));
+		}
+	} else {
+		board = await setBoard('nrf52840dk_nrf52840', 'arm').catch(async () => await setBoard('nrf52_pca10040', 'arm')).catch(() => Promise.resolve(<BoardTuple>{}));
+		if (!board?.board) {
+			vscode.window.showErrorMessage('Couldn\'t find default board. Set kconfig.zephyr.board config manually and restart VS Code.');
+		}
+	}
+
+	return !!(board?.board && board.arch && board?.dir);
+}
+
+export async function activate() {
+	var hrTime = process.hrtime();
+	isZephyr = await checkIsZephyr();
 	if (isZephyr) {
-		board = kEnv.getConfig('zephyr.board') || {board: 'nrf52_pca10040', arch: 'arm'};
-		boardStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 2);
-		boardStatus.text = `$(tools) ${board.board}`;
-		boardStatus.command = 'kconfig.zephyr.setBoard';
-		boardStatus.tooltip = 'Kconfig board';
-		vscode.commands.registerCommand(boardStatus.command, () => {
-			selectBoard();
-		});
-		boardStatus.show();
+		activateZephyr();
 
-		if (process.env['ZEPHYR_SDK_INSTALL_DIR']) {
-			var toolchain_dir = `${zephyrRoot()}/cmake/toolchain/zephyr`;
-			var toolchains = glob.sync('*.*/generic.cmake', {cwd: toolchain_dir}).map(g => g.replace(/\/.*/, ''));
-			if (toolchains.length > 0) {
-				toolchain_kconfig_dir = toolchain_dir + '/' + toolchains[toolchains.length - 1];
-			}
-		}
+		hrTime = process.hrtime(hrTime);
 
-		if (!toolchain_kconfig_dir) {
-			if (process.env['TOOLCHAIN_KCONFIG_DIR']) {
-				toolchain_kconfig_dir = process.env['TOOLCHAIN_KCONFIG_DIR'];
-			} else {
-				var toolchain_root = process.env['TOOLCHAIN_ROOT'] ?? zephyrRoot();
-				toolchain_kconfig_dir = `${toolchain_root}/cmake/toolchain/${process.env['ZEPHYR_TOOLCHAIN_VARIANT'] ?? 'gnuarmemb'}`;
-			}
-		}
-
-		var provider = new DocumentProvider();
-
-		vscode.workspace.registerTextDocumentContentProvider('zephyr', provider);
-
-		kEnv.registerFileProvider('zephyr', provideDoc);
-	} else if (hasWestYml) {
-		west([], (err, out) => {
-			if (err) {
-				vscode.window.showErrorMessage('Error calling west. Try configuring kconfig.zephyr.west.\n' + err);
-				return;
-			}
-			vscode.window.showWarningMessage(`Found west.yml, but failed calling west. Is west initialized?`);
-		})
+		var time_ms = Math.round(hrTime[0] * 1000 + hrTime[1] / 1000000);
+		console.log(`Zephyr activation: ${time_ms} ms`);
 	}
 }
 
@@ -232,7 +275,7 @@ export function setRepo(repo: Repository) {
 						repo.onDidChange(MODULE_FILE);
 					});
 				});
-			}
+			};
 
 			vscode.workspace.createFileSystemWatcher(conf, true, false, true).onDidChange(e => {
 				repo.onDidChange(MODULE_FILE);

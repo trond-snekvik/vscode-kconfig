@@ -8,27 +8,15 @@ import { Repository } from './kconfig';
 
 const MODULE_FILE = vscode.Uri.parse('zephyr:/binary.dir/Kconfig.modules');
 export var isZephyr: boolean;
-var moduleCount = 0;
 var zephyrPath: string | undefined;
 
 function zephyrRoot(): string | undefined {
 	return zephyrPath;
-	var zephyr = vscode.workspace.workspaceFolders?.find(f => f.uri.fsPath.endsWith('zephyr'))?.uri.fsPath;
-	if (zephyr) {
-		return zephyr;
-	}
-
-	vscode.workspace.findFiles('.west/config').then(files => {
-		if (files?.length) {
-			var zephyrpath = fs.readFileSync(files[0].fsPath)?.toString('utf-8').match(/\[zephyr\]\s*base\s*=\s*(\w+)/s);
-
-		}
-	});
 }
 
-function west(args: string[], callback?: (err: ExecException | null, stdout: string) => void): string | undefined {
+function west(args: string[], callback?: (err: ExecException | null, stdout: string) => void): string {
 	var exe = kEnv.getConfig('zephyr.west') ?? 'west';
-	var command = exe + ' ' + ' ' + args.join(' ');
+	var command = exe + ' ' + args.join(' ');
 
 	const options: ExecOptions = {
 		cwd: zephyrRoot() ?? vscode.workspace.workspaceFolders?.[0].uri.fsPath,
@@ -174,9 +162,6 @@ function activateZephyr() {
 	boardStatus.text = `$(circuit-board) ${board.board}`;
 	boardStatus.command = 'kconfig.zephyr.setBoard';
 	boardStatus.tooltip = 'Kconfig board';
-	vscode.commands.registerCommand(boardStatus.command, () => {
-		selectBoard();
-	});
 	boardStatus.show();
 
 	if (process.env['ZEPHYR_SDK_INSTALL_DIR']) {
@@ -203,37 +188,49 @@ function activateZephyr() {
 	kEnv.registerFileProvider('zephyr', provideDoc);
 }
 
-async function checkIsZephyr() {
+async function checkIsZephyr(): Promise<boolean> {
 	var hasWestYml = vscode.workspace.workspaceFolders?.some(f => fs.existsSync(f.uri.fsPath + "/west.yml") || fs.existsSync(f.uri.fsPath + "/.west/config"));
 	if (!hasWestYml) {
 		return false;
 	}
 
-	var manifest = west(['config', 'manifest.path']);
-	if (manifest) {
-		var root = west(['topdir']);
-		if (root) {
-			zephyrPath = root.trim() + '/' + manifest.trim();
-		}
-	}
+	var manifest: string | undefined = undefined;
+	await new Promise(resolve => {
+		west(['config', 'zephyr.base'], (err, out) => {
+			if (err) {
+				vscode.window.showErrorMessage('Unable to call west. Configure kconfig.zephyr.west.\n' + err.message);
+			} else {
+				manifest = out.trim();
+			}
+			resolve();
+		});
+	});
 
-	if (!zephyrPath) {
+	if (!manifest) {
 		return false;
 	}
 
+	var root = west(['topdir']);
+	if (!root) {
+		return false;
+	}
+
+	zephyrPath = root.trim() + '/' + manifest;
 	board = kEnv.getConfig('zephyr.board');
 	if (board?.board && board?.arch) {
 		if (!board.dir) {
 			board = await setBoard(board.board, board.arch).catch(() => Promise.resolve(board));
 		}
 	} else {
-		board = await setBoard('nrf52840dk_nrf52840', 'arm').catch(async () => await setBoard('nrf52_pca10040', 'arm')).catch(() => Promise.resolve(<BoardTuple>{}));
-		if (!board?.board) {
-			vscode.window.showErrorMessage('Couldn\'t find default board. Set kconfig.zephyr.board config manually and restart VS Code.');
-		}
+		const backupBoards = [
+			{ board: 'nrf52840dk_nrf52840', arch: 'arm', dir: `${zephyrPath}/boards/arm/nrf52840dk_nrf52840` },
+			{ board: 'nrf52_pca10040', arch: 'arm', dir: `${zephyrPath}/boards/arm/nrf52_pca10040` },
+		];
+
+		board = backupBoards.find(b => fs.existsSync(b.dir)) ?? <BoardTuple>{};
 	}
 
-	return !!(board?.board && board.arch && board?.dir);
+	return !!(board?.board && board.arch && board.dir);
 }
 
 export async function activate() {
@@ -247,6 +244,16 @@ export async function activate() {
 		var time_ms = Math.round(hrTime[0] * 1000 + hrTime[1] / 1000000);
 		console.log(`Zephyr activation: ${time_ms} ms`);
 	}
+
+	vscode.commands.registerCommand('kconfig.zephyr.setBoard', () => {
+		if (isZephyr) {
+			selectBoard();
+		} else if (vscode.workspace.workspaceFolders) {
+			vscode.window.showWarningMessage('Not in a Zephyr workspace.');
+		} else {
+			vscode.window.showWarningMessage('Zephyr must be opened as a folder or workspace.');
+		}
+	});
 }
 
 var manifestWatcher: vscode.FileSystemWatcher;

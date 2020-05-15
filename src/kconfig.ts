@@ -318,9 +318,9 @@ export class Config {
 			case 'tristate':
 				return ['y', 'n', 'm'].includes(overrideValue);
 			case 'hex':
-				return !!overrideValue.match(/^0x[a-fA-F\d]+/);
+				return !!overrideValue.match(/^0x[a-fA-F\d]+$/);
 			case 'int':
-				return !!overrideValue.match(/^\d+/);
+				return !!overrideValue.match(/^\d+$/);
 			case 'string':
 				return !!overrideValue.match(/^"[^"]*"/);
 			default:

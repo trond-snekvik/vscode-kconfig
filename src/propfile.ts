@@ -28,7 +28,7 @@ export class PropFile {
 
 	parseLine(line: string, lineNumber: number): ConfigOverride | undefined {
 		var thisLine = new vscode.Position(lineNumber, 0);
-		var match = line.match(/^\s*CONFIG_([^\s=]+)\s*(?:=\s*(".*?[^\\]"|""|[ynm]\b|0x[a-fA-F\d]+\b|\d+\b))?/);
+		var match = line.match(/^\s*CONFIG_([^\s=]+)\s*(.*)/);
 		if (!match) {
 			if (!line.match(/^\s*(#|$)/)) {
 				this.parseDiags.push(
@@ -42,7 +42,8 @@ export class PropFile {
 			return undefined;
 		}
 
-		if (!match[2]) {
+		var valueMatch = match[2].match(/(=\s*)(".*?[^\\]"|""|\w+)/);
+		if (!valueMatch) {
 			this.parseDiags.push(
 				new vscode.Diagnostic(
 					new vscode.Range(thisLine, thisLine),
@@ -65,11 +66,30 @@ export class PropFile {
 			return undefined;
 		}
 
-		if (!entry.isValidOverride(match[2])) {
+
+		if (!entry.isValidOverride(valueMatch[2])) {
+			let valueOffset = line.search(valueMatch[2]);
+			var hint = '';
+			switch (entry.type)  {
+				case 'bool':
+				case 'tristate':
+					hint = 'Value must be y or n.';
+					break;
+				case 'hex':
+					hint = 'Value must be a hexadecimal number (0x123abc).';
+					break;
+				case 'int':
+					hint = 'Value must be a decimal number.';
+					break;
+				case 'string':
+					hint = 'Value must be a double quoted string ("abc").';
+					break;
+			}
+
 			this.parseDiags.push(
 				new vscode.Diagnostic(
-					new vscode.Range(thisLine, thisLine),
-					`Invalid value. Entry ${match[1]} is ${entry.type}.`,
+					new vscode.Range(lineNumber, valueOffset, lineNumber, valueOffset + valueMatch[2].length),
+					`Invalid value. Entry ${match[1]} is ${entry.type === 'int' ? 'an' : 'a'} ${entry.type}. ${hint}`,
 					vscode.DiagnosticSeverity.Error
 				)
 			);
@@ -91,11 +111,11 @@ export class PropFile {
 		}
 
 		var value: string;
-		var stringMatch = match[2].match(/^"(.*)"$/);
+		var stringMatch = valueMatch[2].match(/^"(.*)"$/);
 		if (stringMatch) {
 			value = stringMatch[1];
 		} else {
-			value = match[2];
+			value = valueMatch[2];
 		}
 
 		return { config: entry, value: value, line: lineNumber };
@@ -193,7 +213,7 @@ export class PropFile {
 				var range = c.config.getRange(ctx);
 				if ((range.min !== undefined && override < range.min) || (range.max !== undefined && override > range.max)) {
 					diags.push(new vscode.Diagnostic(line,
-						`Entry ${c.value} outside range \`${range.min}\`-\`${range.max}\``,
+						`Value ${c.value} outside range ${range.min}-${range.max}`,
 						vscode.DiagnosticSeverity.Error));
 				}
 			}

@@ -133,9 +133,10 @@ export function getModules() {
 	try {
 		return west(['list', '-f', '"{name}:{posixpath}"'])
 			?.split(/\r?\n/g)
-			.map(line => line.split(':'))
+			.map(line => line.match(/(.*?):(.*)/))
+			.filter(line => line)
 			.reduce((obj, entry) => {
-				obj[entry[0]] = entry[1];
+				obj[entry![1]] = entry![2];
 				return obj;
 			}, {} as {[name: string]: string}) ?? {};
 	} catch (e) {

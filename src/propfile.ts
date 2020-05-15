@@ -167,7 +167,7 @@ export class PropFile {
 		var all = Object.values(this.repo.configs);
 
 		var addRedundancyAction = (c: ConfigOverride, diag: vscode.Diagnostic) => {
-			var action = new vscode.CodeAction(`Remove redundant entry CONFIG_${c.config.name}`, vscode.CodeActionKind.Refactor);
+			var action = new vscode.CodeAction(`Remove redundant entry CONFIG_${c.config.name}`, vscode.CodeActionKind.QuickFix);
 			action.edit = new vscode.WorkspaceEdit();
 			action.edit.delete(this.uri, new vscode.Range(c.line!, 0, c.line! + 1, 0));
 			action.diagnostics = [diag];
@@ -280,7 +280,7 @@ export class PropFile {
 								continue;
 							}
 
-							action = new vscode.CodeAction(`Add ${totLen} missing ${totLen > 1 ? 'dependencies' : 'dependency'}`, vscode.CodeActionKind.Refactor);
+							action = new vscode.CodeAction(`Add ${totLen} missing ${totLen > 1 ? 'dependencies' : 'dependency'}`, vscode.CodeActionKind.QuickFix);
 							action.edit = new vscode.WorkspaceEdit();
 							if (newEntries.length) {
 								action.edit.insert(this.uri,

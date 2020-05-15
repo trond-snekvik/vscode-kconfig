@@ -109,26 +109,6 @@
             "match": "[a-zA-Z\\-_0-9]+",
             "name": "support.variable"
         },
-        "paren-expression": {
-            "begin": "\\(",
-            "end": "\\)",
-            "beginCaptures": {
-                "0": {
-                    "name": "punctuation.paren.open"
-                }
-            },
-            "endCaptures": {
-                "0": {
-                    "name": "punctuation.paren.close"
-                }
-            },
-            "name": "expression.group",
-            "patterns": [
-                {
-                    "include": "#expression"
-                }
-            ]
-        },
         "expression": {
             "patterns": [
                 {
@@ -144,9 +124,6 @@
                     "include": "#tristate"
                 },
                 {
-                    "include": "#paren-expression"
-                },
-                {
                     "include": "#expression-operators"
                 },
                 {
@@ -158,7 +135,7 @@
             ]
         },
         "expression-operators": {
-            "match": "(=|!=|<|>|<=|>=|!|&&|\\|\\|)",
+            "match": "(=|!=|<|>|<=|>=|!|&&|\\|\\|\\(|\\))",
             "name": "keyword.operator"
         },
         "number": {
@@ -180,14 +157,11 @@
             ]
         },
         "line-continuation": {
-            "begin": "\\\\$\\n",
-            "end": "(?<!\\\\)\\n",
+            "begin": "\\\\$",
+            "end": "^",
             "beginCaptures": {
                 "0": {"name": "constant.character.escape"}
-            },
-            "patterns":[
-                {"include": "#expression"}
-            ]
+            }
         },
         "helptext": {
             "begin": "^(\\s+).*",

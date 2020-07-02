@@ -67,10 +67,8 @@ export abstract class Scope {
 
 		if (parent) {
 			this.id = parent.id + '::' + this.id;
-		} else if (!repo.rootScope) {
-			repo.rootScope = this;
-		} else {
-			console.log(`Multiple root scopes: ${this.id} and ${repo.rootScope.id}`);
+		} else if (!(this instanceof RootScope)) {
+			console.error(`Orphan scope: ${this.id} @ ${this.file.uri.fsPath}:${line}`);
 		}
 	}
 
@@ -109,11 +107,15 @@ export abstract class Scope {
 
 export class IfScope extends Scope {
 	expr?: Expression;
-	constructor(expression: string, repo: Repository, line: number, file: ParsedFile, parent?: Scope) {
+	rawExpr: string;
+	parent: Scope;
+	constructor(expression: string, repo: Repository, line: number, file: ParsedFile, parent: Scope) {
 		super('if', expression, repo, line, file, vscode.SymbolKind.Interface, parent);
 		/* Creating the expression now incurs a 30% performance penalty on parsing,
-		 * but makes config file evaluation MUCH faster */
+		* but makes config file evaluation MUCH faster */
 		this.expr = createExpression(expression);
+		this.rawExpr = expression;
+		this.parent = parent;
 	}
 
 	resolve(ctx: EvalContext) {
@@ -124,10 +126,12 @@ export class IfScope extends Scope {
 export class MenuScope extends Scope {
 	dependencies: string[];
 	visible?: Expression;
+	parent: Scope;
 
-	constructor(prompt: string, repo: Repository, line: number, file: ParsedFile, parent?: Scope) {
+	constructor(prompt: string, repo: Repository, line: number, file: ParsedFile, parent: Scope) {
 		super('menu', prompt, repo, line, file, vscode.SymbolKind.Class, parent);
 		this.dependencies = [];
+		this.parent = parent;
 	}
 
 	resolve(ctx: EvalContext) {
@@ -137,9 +141,11 @@ export class MenuScope extends Scope {
 
 export class ChoiceScope extends Scope {
 	choice: ChoiceEntry;
+	parent: Scope;
 	constructor(choice: ChoiceEntry) {
 		super('choice', choice.config.name, choice.config.repo, choice.lines.start, choice.file, vscode.SymbolKind.Enum, choice.scope);
 		this.choice = choice;
+		this.parent = choice.scope;
 	}
 
 	// Override name property to dynamically get it from the ConfigEntry:
@@ -153,12 +159,23 @@ export class ChoiceScope extends Scope {
 	}
 }
 
+export class RootScope extends Scope {
+
+	constructor(repo: Repository) {
+		super('root', 'ROOT', repo, 0, new ParsedFile(repo, vscode.Uri.parse('commandline://'), {}, repo.rootScope), vscode.SymbolKind.Class);
+	}
+
+	resolve(ctx: EvalContext) {
+		return true;
+	}
+}
+
 export class ConfigEntry {
 	config: Config;
 	lines: LineRange;
 	file: ParsedFile;
 	help?: string;
-	scope?: Scope;
+	scope: Scope;
 	ranges: ConfigValueRange[];
 	type?: ConfigValueType;
 	text?: string;
@@ -168,7 +185,7 @@ export class ConfigEntry {
 	implys: ConfigSelect[];
 	defaults: ConfigDefault[];
 
-	constructor(config: Config, line: number, file: ParsedFile, scope?: Scope) {
+	constructor(config: Config, line: number, file: ParsedFile, scope: Scope) {
 		this.config = config;
 		this.lines = {start: line, end: line};
 		this.file = file;
@@ -203,7 +220,7 @@ export class ConfigEntry {
 	}
 
 	isActive(ctx: EvalContext): boolean {
-		return !this.scope || this.scope.evaluate(ctx);
+		return this.dependencies.every(d => resolveExpression(d, ctx)) && this.scope.evaluate(ctx);
 	}
 }
 
@@ -254,14 +271,14 @@ export class Config {
 		return this.entries.find(e => e.text);
 	}
 
-	activeEntries(ctx: EvalContext): ConfigEntry[] {
-		return this.entries.filter(e => e.isActive(ctx));
-	}
-
-	dependencies(ctx: EvalContext): string[] {
+	get dependencies(): string[] {
 		var dependencies: string[] = [];
 		this.entries.forEach(e => dependencies.push(...e.dependencies));
 		return dependencies;
+	}
+
+	activeEntries(ctx: EvalContext): ConfigEntry[] {
+		return this.entries.filter(e => e.isActive(ctx));
 	}
 
 	selects(ctx: EvalContext, name: string): Config[] {
@@ -420,7 +437,21 @@ export class Config {
 	}
 
 	missingDependency(ctx: EvalContext): string | undefined {
-		return this.dependencies(ctx).find(d => !resolveExpression(d, ctx));
+		return this.mainEntry?.dependencies.find(d => !resolveExpression(d, ctx));
+	}
+
+	missingDependencies(ctx: EvalContext): string[] {
+		let deps = this.mainEntry?.dependencies.filter(d => !resolveExpression(d, ctx)) ?? [];
+		let scope = this.mainEntry?.scope;
+		while (scope) {
+			if (scope instanceof IfScope && !scope.evaluate(ctx)) {
+				deps.push(scope.rawExpr);
+			}
+
+			scope = scope.parent;
+		}
+
+		return deps;
 	}
 
 	selector(ctx: EvalContext): Config | undefined {
@@ -428,7 +459,7 @@ export class Config {
 			return undefined;
 		}
 
-		var select = Object.values(ctx.repo.configs).find(
+		var select = ctx.repo.configList.find(
 			c => (
 				(c.type === 'bool' || c.type === 'tristate') &&
 				!c.hasDependency(this.name) &&
@@ -550,7 +581,7 @@ export class ChoiceEntry extends ConfigEntry {
 	choices: Config[];
 	optional = false;
 
-	constructor(name: string, line: number, repo: Repository, file: ParsedFile, scope?: Scope) {
+	constructor(name: string, line: number, repo: Repository, file: ParsedFile, scope: Scope) {
 		super(new Config(name, 'choice', repo), line, file, scope);
 		this.choices = [];
 	}
@@ -574,8 +605,10 @@ export class ChoiceEntry extends ConfigEntry {
 
 export class Repository {
 	configs: {[name: string]: Config};
+
+	private cachedConfigList?: Config[];
 	root?: ParsedFile;
-	rootScope?: Scope;
+	rootScope: RootScope;
 	diags: vscode.DiagnosticCollection;
 	openEditors: vscode.Uri[];
 
@@ -584,6 +617,8 @@ export class Repository {
 		this.diags = diags;
 		this.openEditors = vscode.window.visibleTextEditors.filter(e => e.document.languageId === "kconfig").map(e => e.document.uri);
 		this.openEditors.forEach(uri => this.setDiags(uri));
+		this.cachedConfigList = [];
+		this.rootScope = new RootScope(this);
 
 		vscode.window.onDidChangeVisibleTextEditors(e => {
 			e = e.filter(e => e.document.languageId === 'kconfig');
@@ -598,19 +633,28 @@ export class Repository {
 		});
 	}
 
+	get configList() {
+		if (this.cachedConfigList === undefined) {
+			this.cachedConfigList = Object.values(this.configs);
+		}
+
+		return this.cachedConfigList;
+	}
+
 	setRoot(uri: vscode.Uri) {
 		this.configs = {};
-		this.root = new ParsedFile(this, uri, {});
+		this.root = new ParsedFile(this, uri, {}, this.rootScope);
 	}
 
 	parse() {
+		this.cachedConfigList = undefined;
 		this.root?.parse();
 		this.openEditors.forEach(uri => this.setDiags(uri));
 		this.printStats();
 	}
 
 	reset() {
-		this.rootScope = undefined;
+		this.cachedConfigList = undefined;
 	}
 
 	get files(): ParsedFile[] { // TODO: optimize to a managed dict?
@@ -650,15 +694,15 @@ export class Repository {
 
 	printStats() {
 		console.log(`\tFiles: ${this.files.length}`);
-		console.log(`\tConfigs: ${Object.values(this.configs).length}`);
-		console.log(`\tEmpty configs: ${Object.values(this.configs).filter(c => c.entries.length === 0).length}`);
-		var entriesC = Object.values(this.configs).map(c => c.entries).reduce((sum, num) => [...sum, ...num], []);
+		console.log(`\tConfigs: ${this.configList.length}`);
+		console.log(`\tEmpty configs: ${this.configList.filter(c => c.entries.length === 0).length}`);
+		var entriesC = this.configList.map(c => c.entries).reduce((sum, num) => [...sum, ...num], []);
 		console.log(`\tEntries: ${entriesC.length}`);
 
 		var scopeEntries = (s: Scope) : ConfigEntry[] => {
 			return s.children.map(c => (c instanceof Comment) ? [] : (c instanceof Scope) ? scopeEntries(c) : (c.config.kind === 'choice') ? [] : [c]).reduce((sum, num) => [...sum, ...num], []);
 		};
-		var entriesS = this.rootScope ? scopeEntries(this.rootScope) : [];
+		var entriesS = scopeEntries(this.rootScope);
 		console.log(`\tEntries from scopes: ${entriesS.length}`);
 
 		// console.log(`\tMissing Scope entries: ${entriesC.filter(e => !entriesS.includes(e)).map(e => e.config.name)}`);

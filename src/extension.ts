@@ -3,10 +3,12 @@
 import * as vscode from 'vscode';
 import * as fuzzy from "fuzzysort";
 import { Operator } from './evaluate';
-import { Config, ConfigOverride, ConfigEntry, Repository, IfScope, Scope, Comment } from "./kconfig";
+import { Config, ConfigOverride, ConfigEntry, Repository, IfScope, Scope, Comment, EvalContext } from "./kconfig";
 import * as kEnv from './env';
 import * as zephyr from './zephyr';
 import { PropFile } from './propfile';
+import * as fs from 'fs';
+import * as path from 'path';
 
 class KconfigLangHandler
 	implements
@@ -24,6 +26,8 @@ class KconfigLangHandler
 	operatorCompletions: vscode.CompletionItem[];
 	repo: Repository;
 	conf: ConfigOverride[];
+	temporaryRoot=false;
+	rootChangeIgnore = new Array<string>();
 	propfileRefreshTimer?: NodeJS.Timeout;
 	constructor() {
 		this.operatorCompletions = [
@@ -67,6 +71,24 @@ class KconfigLangHandler
 		this.conf = [];
 	}
 
+	private suggestKconfigRoot(propFile: PropFile) {
+		// hint at Kconfig root file
+		let kconfigRoot = path.resolve(path.dirname(propFile.uri.fsPath), 'Kconfig');
+		if (!this.rootChangeIgnore.includes(kconfigRoot) && kconfigRoot !== this.repo.root?.uri.fsPath && fs.existsSync(kconfigRoot)) {
+			vscode.window.showInformationMessage(`A Kconfig file exists in this directory.\nChange the Kconfig root file?`, 'Temporarily', 'Permanently', 'Never').then(t => {
+				if (t === 'Temporarily') {
+					this.repo.setRoot(vscode.Uri.file(kconfigRoot));
+					this.rescan(false);
+					this.temporaryRoot = true;
+				} else if (t === 'Permanently') {
+					kEnv.setConfig('root', kconfigRoot);
+				} else {
+					this.rootChangeIgnore.push(kconfigRoot);
+				}
+			});
+		}
+	}
+
 	registerHandlers(context: vscode.ExtensionContext) {
 		var disposable: vscode.Disposable;
 
@@ -98,8 +120,17 @@ class KconfigLangHandler
 
 		disposable = vscode.window.onDidChangeActiveTextEditor(e => {
 			if (e?.document.languageId === 'properties') {
-				var file = this.propFile(e.document.uri);
-				file.reparse(e.document);
+				var file;
+				if (this.temporaryRoot) {
+					this.temporaryRoot = false;
+					this.rescan();
+					file = this.propFile(e.document.uri);
+				} else {
+					file = this.propFile(e.document.uri);
+					file.reparse(e.document);
+				}
+
+				this.suggestKconfigRoot(file);
 			}
 		});
 		context.subscriptions.push(disposable);
@@ -114,7 +145,17 @@ class KconfigLangHandler
 
 		disposable = vscode.workspace.onDidOpenTextDocument(d => {
 			if (d.languageId === 'properties') {
-				this.propFile(d.uri).onOpen(d);
+				var file;
+				if (this.temporaryRoot) {
+					this.temporaryRoot = false;
+					this.rescan();
+					file = this.propFile(d.uri);
+				} else {
+					file = this.propFile(d.uri);
+					file.onOpen(d);
+				}
+
+				this.suggestKconfigRoot(file);
 			}
 		});
 		context.subscriptions.push(disposable);
@@ -155,12 +196,12 @@ class KconfigLangHandler
 		return this.propFiles[uri.fsPath];
 	}
 
-	rescan() {
+	rescan(updateRoot=true) {
 		this.propFiles = {};
 		this.diags.clear();
 		this.repo.reset();
 
-		return this.doScan();
+		return this.doScan(updateRoot);
 	}
 
 	refreshOpenPropfiles() {
@@ -169,12 +210,25 @@ class KconfigLangHandler
 			.forEach(e => this.propFile(e.document.uri).reparse(e.document));
 	}
 
-	doScan() {
+	activate(context: vscode.ExtensionContext) {
+		this.registerHandlers(context);
+		this.doScan();
+
+		if (vscode.window.activeTextEditor?.document.languageId === 'properties') {
+			this.suggestKconfigRoot(this.propFile(vscode.window.activeTextEditor.document.uri));
+		}
+	}
+
+	private doScan(updateRoot=true) {
 		var hrTime = process.hrtime();
 
-		var root = kEnv.resolvePath(kEnv.getConfig('root'));
-		if (root) {
-			this.repo.setRoot(root);
+		if (updateRoot) {
+			var root = kEnv.getRootFile();
+			if (root) {
+				this.repo.setRoot(root);
+				this.repo.parse();
+			}
+		} else {
 			this.repo.parse();
 		}
 
@@ -298,18 +352,18 @@ class KconfigLangHandler
 			return this.operatorCompletions;
 		}
 
-		const maxCount = 500;
+		const maxCount = 4324324234500;
 		var entries: Config[];
 		var count: number;
-		if (wordBase.length > 0) {
+		if (false && wordBase.length > 0) {
 			var result = fuzzy.go(wordBase,
-				Object.values(this.repo.configs),
+				this.repo.configList,
 				{ key: 'name', limit: maxCount, allowTypo: true });
 
 			entries = result.map(r => r.obj);
 			count = result.total;
 		} else {
-			entries = Object.values(this.repo.configs);
+			entries = this.repo.configList;
 			count = entries.length;
 			entries = entries.slice(0, maxCount);
 		}
@@ -368,6 +422,7 @@ class KconfigLangHandler
 						break;
 				}
 			}
+
 			return item;
 		});
 
@@ -425,7 +480,7 @@ class KconfigLangHandler
 		if (!entry || !entry.type || !['bool', 'tristate'].includes(entry.type)) {
 			return null;
 		}
-		return Object.values(this.repo.configs)
+		return this.repo.configList
 			.filter(config => (
 				config.allSelects(entry.name).length > 0 ||
 				config.hasDependency(entry!.name)))
@@ -498,12 +553,11 @@ class KconfigLangHandler
 			return symbol;
 		};
 
-		var root = (file.scope ?? this.repo.rootScope);
-		return root ? addScope(root).children : [];
+		return addScope(file.scope).children;
 	}
 
 	provideWorkspaceSymbols(query: string, token: vscode.CancellationToken): vscode.ProviderResult<vscode.SymbolInformation[]> {
-		var entries = fuzzy.go(query.replace(/^CONFIG_/, ''), Object.values(this.repo.configs), {key: 'name'});
+		var entries = fuzzy.go(query.replace(/^CONFIG_/, ''), this.repo.configList, {key: 'name'});
 
 		return entries.map(result => new vscode.SymbolInformation(
 			result.obj.name,
@@ -524,9 +578,8 @@ export async function activate(context: vscode.ExtensionContext) {
 	}
 
 	var langHandler = new KconfigLangHandler();
-	langHandler.registerHandlers(context);
 
-	langHandler.doScan();
+	langHandler.activate(context);
 }
 
 export function deactivate() {}

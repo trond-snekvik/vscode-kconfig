@@ -13,14 +13,14 @@ export class ParsedFile {
 	readonly repo: Repository;
 	readonly parent?: ParsedFile;
 	readonly env: {[name: string]: string};
-	readonly scope?: Scope;
+	readonly scope: Scope;
 
 	version: number;
 	inclusions: FileInclusion[];
 	entries: ConfigEntry[];
 	diags: vscode.Diagnostic[];
 
-	constructor(repo: Repository, uri: vscode.Uri, env: {[name: string]: string}, scope?: Scope, parent?: ParsedFile) {
+	constructor(repo: Repository, uri: vscode.Uri, env: {[name: string]: string}, scope: Scope, parent?: ParsedFile) {
 		this.repo = repo;
 		this.uri = uri;
 		this.env = { ...env };
@@ -144,7 +144,7 @@ export class ParsedFile {
 			return;
 		}
 
-		var setScope = (s?: Scope) => {
+		var setScope = (s: Scope) => {
 			if (s && scope) {
 				scope = scope.addScope(s);
 			} else {
@@ -257,7 +257,13 @@ export class ParsedFile {
 			}
 			match = line.match(sourceMatch);
 			if (match) {
-				var includeFile = kEnv.resolvePath(match[2], match[1] === 'rsource' ? path.dirname(this.uri.fsPath) : undefined);
+				let baseDir: string;
+				if (match[1] === 'rsource') {
+					baseDir = path.dirname(this.uri.fsPath);
+				} else {
+					baseDir = kEnv.getRoot();
+				}
+				var includeFile = kEnv.resolvePath(match[2], baseDir);
 				var range = new vscode.Range(
 					new vscode.Position(lineNumber, match[1].length + 1),
 					new vscode.Position(lineNumber, match[0].length - 1));
@@ -289,7 +295,7 @@ export class ParsedFile {
 				choice = null;
 				if (scope instanceof ChoiceScope) {
 					scope.lines.end = lineNumber;
-					scope = scope.parent;
+					scope = scope.parent!;
 				} else {
 					this.diags.push(new vscode.Diagnostic(lineRange, `Unexpected endchoice`, vscode.DiagnosticSeverity.Error));
 					unterminatedScope(scope);
@@ -299,7 +305,7 @@ export class ParsedFile {
 			match = line.match(ifMatch);
 			if (match) {
 				entry = null;
-				setScope(new IfScope(match[1], this.repo, lineNumber, this, scope));
+				setScope(new IfScope(match[1], this.repo, lineNumber, this, scope!));
 				continue;
 			}
 			match = line.match(endifMatch);
@@ -317,7 +323,7 @@ export class ParsedFile {
 			match = line.match(menuMatch);
 			if (match) {
 				entry = null;
-				setScope(new MenuScope(match[2], this.repo, lineNumber, this, scope));
+				setScope(new MenuScope(match[2], this.repo, lineNumber, this, scope!));
 				continue;
 			}
 			match = line.match(endMenuMatch);

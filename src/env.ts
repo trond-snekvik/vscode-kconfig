@@ -17,9 +17,35 @@ export function getConfig(name: string): any {
 	return conf;
 }
 
+export function setConfig(name: string, value: any) {
+	config.update(name, value, vscode.ConfigurationTarget.Workspace);
+}
+
+export function getRootFile(): vscode.Uri {
+	var root = getConfig('root');
+	if (!root) {
+		if (zephyr.isZephyr) {
+			root = '${ZEPHYR_BASE}/Kconfig';
+		} else {
+			root = '${workspaceFolder}/Kconfig';
+		}
+	}
+
+	return resolvePath(root);
+}
+
+/// Root directory of project
+export function getRoot() {
+	if (zephyr.isZephyr && zephyr.zephyrRoot) {
+		return zephyr.zephyrRoot!;
+	}
+
+	return path.dirname(getRootFile().fsPath);
+}
+
 export function isActive(): boolean {
-	var root = getConfig('root') as string | undefined;
-	return !!(root && fs.existsSync(root));
+	var root = getRootFile();
+	return !!(root && fs.existsSync(root.fsPath));
 }
 
 var env: { [name: string]: string };
@@ -67,47 +93,44 @@ export function update() {
 }
 
 export function pathReplace(fileName: string): string {
+	fileName = fileName.replace('${workspaceFolder}', vscode.workspace.workspaceFolders?.[0].uri.fsPath ?? '');
 	fileName = fileName.replace(/\${workspaceFolder:(.+?)}/g, (original, name) => {
 		var folder = vscode.workspace.workspaceFolders!.find(folder => folder.name === name);
 		return folder ? folder.uri.fsPath : original;
 	});
 
-	fileName = fileName.replace(/\$[{(](.+?)[})]/g, (original: string, v: string) => {
-		if (v in process.env) {
-			return process.env[v] as string;
-		} else if (v in env) {
+	fileName = fileName.replace(/\$[{(]?(\w+)[})]?/g, (original: string, v: string) => {
+		if (v in env) {
 			return env[v];
+		} else if (v in process.env) {
+			return process.env[v] as string;
 		}
-		return original;
+		return '';
 	});
 
 	return fileName.replace(/$\([^)]+\)/g, '');
 }
 
-export function getRoot(file?: string): string {
-	try {
-		var rootFile = getConfig('root');
-		if (rootFile) {
-			return pathReplace(path.dirname(rootFile));
-		}
-		return vscode.workspace.workspaceFolders!.find(folder => path.normalize(file ? file : vscode.window.activeTextEditor!.document.fileName).startsWith(path.normalize(folder.uri.fsPath)))!.uri.fsPath;
-	} catch (e) {
-		return '';
+export function getWorkspaceRoot(file: string): string {
+	if (path.isAbsolute(file)) {
+		return vscode.workspace.getWorkspaceFolder(vscode.Uri.file(file))?.uri.fsPath ?? path.dirname(file);
 	}
+
+	return vscode.workspace.workspaceFolders?.find(w => fs.existsSync(path.resolve(w.uri.fsPath, file)))?.uri.fsPath ?? vscode.workspace.workspaceFolders?.[0].uri.fsPath ?? path.dirname(file);
 }
 
-export function resolvePath(fileName: string, root?: string): vscode.Uri {
-	if (!root) {
-		root = getRoot(fileName);
-	}
-	fileName = fileName.replace('${workspaceFolder}', root);
+export function resolvePath(fileName: string, base?: string): vscode.Uri {
 	fileName = pathReplace(fileName);
-	if (fileName.match(/^\w{2,}:\//)) {
+	if (fileName.match(/^\w{2,}:\//)) { // raw URI
 		return vscode.Uri.parse(fileName);
 	}
 
+	if (!base) {
+		base = getWorkspaceRoot(fileName);
+	}
+
 	// Relying on the uri accepting files without schemes:
-	return vscode.Uri.file(path.normalize(path.isAbsolute(fileName) ? fileName : path.join(root ? root : root, fileName)));
+	return vscode.Uri.file(path.resolve(base, fileName));
 }
 
 export type Environment = { [variable: string]: string };

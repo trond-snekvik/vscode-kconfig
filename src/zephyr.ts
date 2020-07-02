@@ -5,21 +5,25 @@ import * as yaml from 'yaml';
 import * as kEnv from './env';
 import * as glob from 'glob';
 import { Repository } from './kconfig';
+import * as child_process from 'child_process';
 
 const MODULE_FILE = vscode.Uri.parse('zephyr:/binary.dir/Kconfig.modules');
 export var isZephyr: boolean;
-var zephyrPath: string | undefined;
-
-function zephyrRoot(): string | undefined {
-	return zephyrPath;
-}
+export var zephyrRoot: string | undefined;
 
 function west(args: string[], callback?: (err: ExecException | null, stdout: string) => void): string {
-	var exe = kEnv.getConfig('zephyr.west') ?? 'west';
+	var exe = kEnv.getConfig('zephyr.west');
+	if (!exe) {
+		if (process.platform === 'win32') {
+			exe = 'west';
+		} else {
+			exe = '/home/trond/.local/bin/west';
+		}
+	}
 	var command = exe + ' ' + args.join(' ');
 
 	const options: ExecOptions = {
-		cwd: zephyrRoot() ?? vscode.workspace.workspaceFolders?.[0].uri.fsPath,
+		cwd: zephyrRoot ?? vscode.workspace.workspaceFolders?.find(w => w.name.match(/zephyr/i))?.uri.fsPath ?? vscode.workspace.workspaceFolders?.[0].uri.fsPath,
 		env: process.env
 	};
 
@@ -57,8 +61,7 @@ export function getKconfigRoots() {
 var toolchain_kconfig_dir: string;
 
 export function getConfig(name: string) {
-	var root = zephyrRoot();
-	if (!isZephyr || !zephyrRoot()) {
+	if (!isZephyr || !zephyrRoot) {
 		return;
 	}
 
@@ -72,11 +75,11 @@ export function getConfig(name: string) {
 				SOC_DIR: "soc",
 				CMAKE_BINARY_DIR: "zephyr:/binary.dir",
 				TOOLCHAIN_KCONFIG_DIR: toolchain_kconfig_dir,
+				ZEPHYR_ROOT: zephyrRoot,
+				ZEPHYR_BASE: zephyrRoot,
 			};
 		case 'conf_files':
 			return [`${board.dir}/${board.board}_defconfig`];
-		case 'root':
-			return root + '/Kconfig';
 	}
 }
 
@@ -87,7 +90,7 @@ var boardStatus: vscode.StatusBarItem;
 
 function setBoard(board: string, arch: string): Promise<BoardTuple> {
 	return new Promise<BoardTuple>((resolve, reject) => {
-		glob(`**/${board}_defconfig`, { absolute: true, cwd: `${zephyrRoot()}/boards/${arch}`, nounique: true, nodir: true, nobrace: true, nosort: true }, (err, matches) => {
+		glob(`**/${board}_defconfig`, { absolute: true, cwd: `${zephyrRoot}/boards/${arch}`, nounique: true, nodir: true, nobrace: true, nosort: true }, (err, matches) => {
 			if (err || matches.length === 0) {
 				reject();
 				return;
@@ -163,10 +166,20 @@ function activateZephyr() {
 	boardStatus.text = `$(circuit-board) ${board.board}`;
 	boardStatus.command = 'kconfig.zephyr.setBoard';
 	boardStatus.tooltip = 'Kconfig board';
-	boardStatus.show();
+
+	let toggleBoardStatus = (e?: vscode.TextEditor) => {
+		if (e?.document?.languageId === 'properties') {
+			boardStatus.show();
+		} else {
+			boardStatus.hide();
+		}
+	};
+
+	toggleBoardStatus(vscode.window.activeTextEditor);
+	vscode.window.onDidChangeActiveTextEditor(toggleBoardStatus);
 
 	if (process.env['ZEPHYR_SDK_INSTALL_DIR']) {
-		var toolchain_dir = `${zephyrRoot()}/cmake/toolchain/zephyr`;
+		var toolchain_dir = `${zephyrRoot}/cmake/toolchain/zephyr`;
 		var toolchains = glob.sync('*.*/generic.cmake', {cwd: toolchain_dir}).map(g => g.replace(/\/.*/, ''));
 		if (toolchains.length > 0) {
 			toolchain_kconfig_dir = toolchain_dir + '/' + toolchains[toolchains.length - 1];
@@ -177,7 +190,7 @@ function activateZephyr() {
 		if (process.env['TOOLCHAIN_KCONFIG_DIR']) {
 			toolchain_kconfig_dir = process.env['TOOLCHAIN_KCONFIG_DIR'];
 		} else {
-			var toolchain_root = process.env['TOOLCHAIN_ROOT'] ?? zephyrRoot();
+			var toolchain_root = process.env['TOOLCHAIN_ROOT'] ?? zephyrRoot;
 			toolchain_kconfig_dir = `${toolchain_root}/cmake/toolchain/${process.env['ZEPHYR_TOOLCHAIN_VARIANT'] ?? 'gnuarmemb'}`;
 		}
 	}
@@ -189,34 +202,46 @@ function activateZephyr() {
 	kEnv.registerFileProvider('zephyr', provideDoc);
 }
 
+async function getZephyrBase() {
+	let base = kEnv.getConfig('zephyr.base');
+	if (base) {
+		return base;
+	}
+
+	return process.env['ZEPHYR_BASE'];
+}
+
 async function checkIsZephyr(): Promise<boolean> {
-	var hasWestYml = vscode.workspace.workspaceFolders?.some(f => fs.existsSync(f.uri.fsPath + "/west.yml") || fs.existsSync(f.uri.fsPath + "/.west/config"));
-	if (!hasWestYml) {
+	zephyrRoot = kEnv.resolvePath(await getZephyrBase()).fsPath;
+	let hasWestYml = vscode.workspace.workspaceFolders?.some(f => fs.existsSync(f.uri.fsPath + "/west.yml") || fs.existsSync(f.uri.fsPath + "/.west/config"));
+	if (!hasWestYml && !zephyrRoot) {
 		return false;
 	}
 
-	var manifest: string | undefined = undefined;
-	await new Promise(resolve => {
-		west(['config', 'zephyr.base'], (err, out) => {
-			if (err) {
-				vscode.window.showErrorMessage('Unable to call west. Configure kconfig.zephyr.west.\n' + err.message);
-			} else {
-				manifest = out.trim();
-			}
-			resolve();
+	if (!zephyrRoot) {
+		let manifest: string | undefined = undefined;
+		await new Promise(resolve => {
+			west(['config', 'zephyr.base'], (err, out) => {
+				if (err) {
+					vscode.window.showErrorMessage('Unable to call west. Configure kconfig.zephyr.west.\n' + err.message);
+				} else {
+					manifest = out.trim();
+				}
+				resolve();
+			});
 		});
-	});
 
-	if (!manifest) {
-		return false;
+		if (!manifest) {
+			return false;
+		}
+		let root = west(['topdir']);
+		if (!root) {
+			return false;
+		}
+
+		zephyrRoot = root.trim() + '/' + manifest;
 	}
 
-	var root = west(['topdir']);
-	if (!root) {
-		return false;
-	}
-
-	zephyrPath = root.trim() + '/' + manifest;
 	board = kEnv.getConfig('zephyr.board');
 	if (board?.board && board?.arch) {
 		if (!board.dir) {
@@ -224,8 +249,8 @@ async function checkIsZephyr(): Promise<boolean> {
 		}
 	} else {
 		const backupBoards = [
-			{ board: 'nrf52840dk_nrf52840', arch: 'arm', dir: `${zephyrPath}/boards/arm/nrf52840dk_nrf52840` },
-			{ board: 'nrf52_pca10040', arch: 'arm', dir: `${zephyrPath}/boards/arm/nrf52_pca10040` },
+			{ board: 'nrf52840dk_nrf52840', arch: 'arm', dir: `${zephyrRoot}/boards/arm/nrf52840dk_nrf52840` },
+			{ board: 'nrf52_pca10040', arch: 'arm', dir: `${zephyrRoot}/boards/arm/nrf52_pca10040` },
 		];
 
 		board = backupBoards.find(b => fs.existsSync(b.dir)) ?? <BoardTuple>{};

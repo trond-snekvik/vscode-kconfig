@@ -217,7 +217,7 @@ export class PropFile {
 
 		var actions = <vscode.CodeAction[]>[];
 
-		var all = Object.values(this.repo.configs);
+		var all = this.repo.configList;
 
 		var addRedundancyAction = (c: ConfigOverride, diag: vscode.Diagnostic) => {
 			var action = new vscode.CodeAction(`Remove redundant entry CONFIG_${c.config.name}`, vscode.CodeActionKind.QuickFix);

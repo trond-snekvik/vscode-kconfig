@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { Config, ConfigOverride, Repository, EvalContext } from "./kconfig";
-import { tokenizeExpression, TokenKind, resolveExpression } from './evaluate';
+import { Token, makeExpr, tokenizeExpression, TokenKind, resolveExpression } from './evaluate';
 
 export class PropFile {
 	actions: vscode.CodeAction[] = [];
@@ -150,6 +150,59 @@ export class PropFile {
 		return new Promise(resolve => setImmediate(() => resolve()));
 	}
 
+	private getDependencyOverrides(missingDependency: string, ctx: EvalContext) {
+		let entries: ConfigOverride[] = [];
+		let tokens = tokenizeExpression(missingDependency);
+		let variables = tokens
+			.filter(t => t.kind === TokenKind.VAR)
+			.map(t => this.repo.configs[t.value])
+			.filter(e => (e && e.text && e.type && ['bool', 'tristate'].includes(e.type)));
+
+		// Unless the expression is too complex, try all combinations to find one that works:
+		if (variables.length > 0 && variables.length < 4) {
+			// Try all combinations of the variables by iterating, using each bit as a suggested solution
+			for (let bitmap = 0; bitmap < (1 << variables.length); bitmap++) {
+				let replacements = variables.map((v, i) => { return { name: v.name, value: (bitmap & (1 << i)) ? 'y' : 'n' }; });
+				let replacedTokens = tokens.map(t => {
+					if (t.kind === TokenKind.VAR) {
+						let replacement = replacements.find(r => r.name === t.value)?.value;
+						if (replacement) {
+							return <Token>{kind: TokenKind.TRISTATE, value: replacement};
+						}
+					}
+
+					return t;
+				});
+
+				// have replaced all boolean VAR tokens with y or n depending on their bitfield value:
+				if (makeExpr(replacedTokens).solve(ctx)) {
+					replacements.forEach(r => {
+						let dup = this.conf.find(c => r.name === c.config.name);
+						let entry = null;
+						if (!dup) {
+							entry = {config: ctx.repo.configs[r.name], value: r.value};
+						} else if (dup.value !== r.value) {
+							entry = {config: dup.config, value: r.value, line: dup.line};
+						} else {
+							return;
+						}
+
+						// Do this recursively to brute force our way up the dependency tree:
+						let entryDep = entry.config.missingDependency(ctx);
+						if (entryDep) {
+							entries.push(...this.getDependencyOverrides(entryDep, ctx).filter(e => !entries.some(existing => e.config.name === existing.config.name && e.value === existing.value)));
+						}
+
+						entries.push(entry);
+					});
+					break;
+				}
+			}
+		}
+
+		return entries;
+	}
+
 	async lint() {
 		if (this.timeout) {
 			clearTimeout(this.timeout);
@@ -171,7 +224,6 @@ export class PropFile {
 			action.edit = new vscode.WorkspaceEdit();
 			action.edit.delete(this.uri, new vscode.Range(c.line!, 0, c.line! + 1, 0));
 			action.diagnostics = [diag];
-			action.isPreferred = true;
 			actions.push(action);
 		};
 
@@ -189,7 +241,6 @@ export class PropFile {
 			var override = c.config.resolveValueString(c.value);
 			var line = new vscode.Range(c.line!, 0, c.line!, 99999999);
 			var diag: vscode.Diagnostic;
-			var action: vscode.CodeAction;
 
 			if (!c.config.text) {
 				diag = new vscode.Diagnostic(line,
@@ -220,8 +271,13 @@ export class PropFile {
 
 			// tslint:disable-next-line: triple-equals
 			if (override == c.config.defaultValue(ctx)) {
+				let defaultValue = c.value;
+				if (c.config.type === 'bool') {
+					defaultValue = c.value === 'y' ? 'enabled' : 'disabled';
+				}
+
 				diag = new vscode.Diagnostic(line,
-					`Entry ${c.config.name} is redundant (same as default)`,
+					`Entry ${c.config.name} is ${defaultValue} by default`,
 					vscode.DiagnosticSeverity.Hint);
 				diag.tags = [vscode.DiagnosticTag.Unnecessary];
 				diags.push(diag);
@@ -229,78 +285,59 @@ export class PropFile {
 				addRedundancyAction(c, diag);
 			}
 
-			var missingDependency = c.config.missingDependency(ctx);
-			if (missingDependency) {
+			var missingDependencies = c.config.missingDependencies(ctx);
+			if (missingDependencies.length) {
+				let depText = missingDependencies.length > 1 ? `dependencies` : `dependency ${missingDependencies[0]}`;
 				if (c.value === 'n') {
 					diag = new vscode.Diagnostic(line,
-						`Entry is already disabled by dependency: ${missingDependency}`,
+						`Entry is already disabled by missing ${depText}`,
 						vscode.DiagnosticSeverity.Hint);
 					diag.tags = [vscode.DiagnosticTag.Unnecessary];
 
 					addRedundancyAction(c, diag);
-				} else {
-					diag = new vscode.Diagnostic(line,
-						`Entry ${c.config.name} dependency ${missingDependency} missing.`,
-						vscode.DiagnosticSeverity.Warning);
+					diags.push(diag);
+					continue;
 				}
 
-				var dep = ctx.repo.configs[missingDependency];
-				if (dep) {
-					diag.relatedInformation = [
-						new vscode.DiagnosticRelatedInformation(dep.entries[0].loc, `${missingDependency} declared here`)
-					];
-				}
+				diag = new vscode.Diagnostic(line,
+					`Entry ${c.config.name}: failing ${depText}`,
+					vscode.DiagnosticSeverity.Warning);
+				diag.relatedInformation = [];
 
-				var tokens = tokenizeExpression(missingDependency);
-				var variables = tokens
-					.filter(t => t.kind === TokenKind.VAR)
-					.map(t => this.repo.configs[t.value])
-					.filter(e => (e && e.text && e.type && ['bool', 'tristate'].includes(e.type)));
-
-				/* Unless the expression is too complex, try all combinations to find one that works: */
-				if (variables.length > 0 && variables.length < 4) {
-					for (var code = 0; code < (1 << variables.length); code++) {
-						var overrides: ConfigOverride[] = variables.map((v, i) => { return { config: v!, value: (code & (1 << i)) ? 'y' : 'n' }; });
-						if (resolveExpression(missingDependency, new EvalContext(this.repo, overrides.concat(this.overrides)))) {
-							var newEntries: ConfigOverride[] = [];
-							var existingEntries: ConfigOverride[] = [];
-							overrides.forEach(o => {
-								var dup = this.conf.find(c => o.config.name === c.config.name);
-								if (dup) {
-									if (dup.value !== o.value) {
-										existingEntries.push({config: dup.config, value: o.value, line: dup.line});
-									}
-								} else {
-									newEntries.push(o);
-								}
-							});
-
-							var totLen = newEntries.length + existingEntries.length;
-							if (totLen === 0) {
-								continue;
-							}
-
-							action = new vscode.CodeAction(`Add ${totLen} missing ${totLen > 1 ? 'dependencies' : 'dependency'}`, vscode.CodeActionKind.QuickFix);
-							action.edit = new vscode.WorkspaceEdit();
-							if (newEntries.length) {
-								action.edit.insert(this.uri,
-									new vscode.Position(c.line!, 0),
-									newEntries.map(c => `CONFIG_${c.config.name}=${c.value}\n`).join(''));
-							}
-							if (existingEntries.length) {
-								existingEntries.forEach(e => {
-									action.edit!.replace(this.uri,
-										new vscode.Range(e.line!, 0, e.line!, 999999),
-										`CONFIG_${e.config.name}=${e.value}`);
-								});
-							}
-							action.isPreferred = true;
-							action.diagnostics = [diag];
-							actions.push(action);
-							break;
-						}
+				let overrides = new Array<ConfigOverride>();
+				missingDependencies.forEach(missingDependency => {
+					var dep = ctx.repo.configs[missingDependency.replace(/[!() ]/g, '')];
+					if (dep) {
+						diag.relatedInformation!.push(new vscode.DiagnosticRelatedInformation(dep.entries[0].loc, `${dep.name} declared here`));
 					}
+
+					overrides.push(...this.getDependencyOverrides(missingDependency, ctx));
+				});
+
+				let newOverrides = overrides.filter(o => o.line === undefined);
+				let existingOverrides = overrides.filter(o => o.line !== undefined);
+
+				if (overrides.length) {
+					let action = new vscode.CodeAction(`Fix ${overrides.length} missing ${overrides.length > 1 ? 'dependencies' : 'dependency'}`, vscode.CodeActionKind.QuickFix);
+					action.diagnostics = [diag];
+
+					action.edit = new vscode.WorkspaceEdit();
+					if (newOverrides.length) {
+						action.edit.insert(this.uri,
+							new vscode.Position(c.line!, 0),
+							newOverrides.map(c => `CONFIG_${c.config.name}=${c.value}\n`).join(''));
+					}
+
+					existingOverrides.forEach(e => {
+						action.edit!.replace(this.uri,
+							new vscode.Range(e.line!, 0, e.line!, 999999),
+							`CONFIG_${e.config.name}=${e.value}`);
+					});
+
+					actions.push(action);
+				} else {
 				}
+
 				diags.push(diag);
 				continue;
 			}

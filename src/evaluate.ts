@@ -234,7 +234,7 @@ export function tokenizeExpression(expr: string): Token[] {
 	return tokens;
 }
 
-function makeExpr(tokens: Token[]): Expression {
+export function makeExpr(tokens: Token[]): Expression {
 	// Tokens in order of precendence:
 	var tokenOrder = [
 		TokenKind.VAR, TokenKind.STRING, TokenKind.NUMBER, TokenKind.TRISTATE,

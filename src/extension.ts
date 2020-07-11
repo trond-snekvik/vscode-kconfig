@@ -562,13 +562,18 @@ class KconfigLangHandler
 	}
 
 	provideWorkspaceSymbols(query: string, token: vscode.CancellationToken): vscode.ProviderResult<vscode.SymbolInformation[]> {
-		var entries = fuzzy.go(query.replace(/^CONFIG_/, ''), this.repo.configList, {key: 'name'});
+		var entries: Config[];
+		if (query) {
+			entries = fuzzy.go(query.replace(/^CONFIG_/, ''), this.repo.configList, {key: 'name'}).map(result => result.obj);
+		} else {
+			entries = this.repo.configList;
+		}
 
-		return entries.map(result => new vscode.SymbolInformation(
-			result.obj.name,
+		return entries.map(e => new vscode.SymbolInformation(
+			e.name,
 			vscode.SymbolKind.Property,
-			result.obj.entries[0].scope?.name ?? '',
-			result.obj.entries[0].loc));
+			e.entries[0].scope?.name ?? '',
+			e.entries[0].loc));
 	}
 
 }

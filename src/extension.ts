@@ -75,6 +75,12 @@ class KconfigLangHandler
 		this.conf = [];
 	}
 
+	private setKconfigLang(d: vscode.TextDocument) {
+		if ((!d.languageId || d.languageId === 'plaintext') && path.basename(d.fileName).startsWith('Kconfig.')) {
+			vscode.languages.setTextDocumentLanguage(d, 'kconfig');
+		}
+	}
+
 	private suggestKconfigRoot(propFile: PropFile) {
 		// hint at Kconfig root file
 		let kconfigRoot = path.resolve(path.dirname(propFile.uri.fsPath), 'Kconfig');
@@ -137,6 +143,8 @@ class KconfigLangHandler
 				}
 
 				this.suggestKconfigRoot(file);
+			} else if (e?.document) {
+				this.setKconfigLang(e.document);
 			}
 		});
 		context.subscriptions.push(disposable);
@@ -163,6 +171,8 @@ class KconfigLangHandler
 				}
 
 				this.suggestKconfigRoot(file);
+			} else {
+				this.setKconfigLang(d);
 			}
 		});
 		context.subscriptions.push(disposable);
@@ -226,6 +236,9 @@ class KconfigLangHandler
 			return;
 		}
 
+		vscode.workspace.textDocuments.forEach(d => {
+			this.setKconfigLang(d);
+		});
 		this.registerHandlers(context);
 		this.repo.setRoot(root);
 		this.doScan();

@@ -24,7 +24,8 @@
 	"activationEvents": [
 		"onLanguage:kconfig",
 		"onLanguage:properties",
-		"onLanguage:c"
+		"onLanguage:c",
+		"workspaceContains:Kconfig"
 	],
 	"main": "./out/extension.js",
 	"contributes": {
@@ -109,9 +110,9 @@
 				"aliases": [
 					"Kconfig"
 				],
-				"filenamePatterns": [
+				"filenames": [
 					"Kconfig",
-					"Kconfig.*"
+					"Kconfig.zephyr"
 				],
 				"configuration": "./language-configuration.json"
 			}

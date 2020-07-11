@@ -44,6 +44,10 @@ export function getRoot() {
 }
 
 export function isActive(): boolean {
+	if (getConfig('disabled')) {
+		return false;
+	}
+
 	var root = getRootFile();
 	return !!(root && fs.existsSync(root.fsPath));
 }

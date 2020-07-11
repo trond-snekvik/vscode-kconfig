@@ -72,6 +72,11 @@
 							"type": "string"
 						}
 					},
+					"kconfig.disable": {
+						"type": "boolean",
+						"description": "Disable Kconfig language features",
+						"default": false
+					},
 					"kconfig.zephyr.board": {
 						"type": "object",
 						"description": "Zephyr board to compile for",

@@ -188,23 +188,26 @@ class KconfigLangHandler
 		});
 		context.subscriptions.push(disposable);
 
-		var selector = [{ language: 'kconfig', scheme: 'file' }, { language: 'properties', scheme: 'file' }];
+		const kconfig = [{ language: 'kconfig', scheme: 'file' }, { language: 'kconfig', scheme: 'kconfig' }];
+		const properties = [{ language: 'properties', scheme: 'file' }];
+		const cFiles = [{ language: 'c', scheme: 'file' }];
+		const all = [...kconfig, ...properties, ...cFiles];
 
-		disposable = vscode.languages.registerDefinitionProvider(selector.concat([{language: 'c', scheme: 'file'}]), this);
+		disposable = vscode.languages.registerDefinitionProvider(all, this);
 		context.subscriptions.push(disposable);
-		disposable = vscode.languages.registerHoverProvider(selector.concat([{language: 'c', scheme: 'file'}]), this);
+		disposable = vscode.languages.registerHoverProvider(all, this);
 		context.subscriptions.push(disposable);
-		disposable = vscode.languages.registerCompletionItemProvider(selector, this);
+		disposable = vscode.languages.registerCompletionItemProvider([...kconfig, ...properties], this);
 		context.subscriptions.push(disposable);
-		disposable = vscode.languages.registerDocumentLinkProvider({ language: 'kconfig', scheme: 'file' }, this);
+		disposable = vscode.languages.registerDocumentLinkProvider(kconfig, this);
 		context.subscriptions.push(disposable);
-		disposable = vscode.languages.registerCodeActionsProvider({ language: 'properties', scheme: 'file' }, this);
+		disposable = vscode.languages.registerCodeActionsProvider(properties, this);
 		context.subscriptions.push(disposable);
-		disposable = vscode.languages.registerDocumentSymbolProvider(selector, this);
+		disposable = vscode.languages.registerDocumentSymbolProvider([...kconfig, ...properties], this);
 		context.subscriptions.push(disposable);
 		disposable = vscode.languages.registerWorkspaceSymbolProvider(this);
 		context.subscriptions.push(disposable);
-		disposable = vscode.languages.registerReferenceProvider({ language: 'kconfig', scheme: 'file' }, this);
+		disposable = vscode.languages.registerReferenceProvider(kconfig, this);
 		context.subscriptions.push(disposable);
 	}
 

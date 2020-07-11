@@ -5,7 +5,7 @@
  */
 import * as vscode from 'vscode';
 import { resolveExpression, createExpression, Expression } from './evaluate';
-import {ParsedFile} from './parse';
+import { ParsedFile } from './parse';
 
 export type ConfigValue = string | number | boolean;
 export type ConfigValueRange = { max: string, min: string, condition?: Expression };

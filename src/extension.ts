@@ -6,7 +6,7 @@
 import * as vscode from 'vscode';
 import * as fuzzy from "fuzzysort";
 import { Operator } from './evaluate';
-import { Config, ConfigOverride, ConfigEntry, Repository, IfScope, Scope, Comment, EvalContext } from "./kconfig";
+import { Config, ConfigOverride, ConfigEntry, Repository, IfScope, Scope, Comment } from "./kconfig";
 import * as kEnv from './env';
 import * as zephyr from './zephyr';
 import { PropFile } from './propfile';
@@ -384,23 +384,6 @@ class KconfigLangHandler
 			return this.operatorCompletions;
 		}
 
-		const maxCount = 4324324234500;
-		var entries: Config[];
-		var count: number;
-		if (false && wordBase.length > 0) {
-			var result = fuzzy.go(wordBase,
-				this.repo.configList,
-				{ key: 'name', limit: maxCount, allowTypo: true });
-
-			entries = result.map(r => r.obj);
-			count = result.total;
-		} else {
-			entries = this.repo.configList;
-			count = entries.length;
-			entries = entries.slice(0, maxCount);
-		}
-
-
 		if (isProperties) {
 			var lineRange = new vscode.Range(position.line, 0, position.line, 999999);
 			var lineText = document.getText(lineRange);
@@ -413,7 +396,7 @@ class KconfigLangHandler
 			'choice': vscode.CompletionItemKind.Enum,
 		};
 
-		items = entries.map(e => {
+		items = this.repo.configList.map(e => {
 			var item = new vscode.CompletionItem(isProperties ? `CONFIG_${e.name}` : e.name, (e.kind ? kinds[e.kind] : vscode.CompletionItemKind.Text));
 			item.sortText = e.name;
 			item.detail = e.text;
@@ -462,7 +445,7 @@ class KconfigLangHandler
 			items.push(new vscode.CompletionItem('if', vscode.CompletionItemKind.Keyword));
 		}
 
-		return { isIncomplete: (count >= maxCount), items: items };
+		return items;
 	}
 
 	resolveCompletionItem(item: vscode.CompletionItem, token: vscode.CancellationToken): vscode.ProviderResult<vscode.CompletionItem> {

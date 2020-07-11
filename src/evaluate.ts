@@ -3,7 +3,7 @@
  *
  * SPDX-License-Identifier: MIT
  */
-import { Config, ConfigValue, ConfigValueType, ConfigOverride, Repository, EvalContext } from "./kconfig";
+import { ConfigValue, EvalContext } from "./kconfig";
 
 
 export enum TokenKind {

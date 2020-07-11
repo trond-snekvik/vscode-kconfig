@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: MIT
  */
 import * as vscode from 'vscode';
-import { Config, ConfigOverride, Repository, EvalContext } from "./kconfig";
-import { Token, makeExpr, tokenizeExpression, TokenKind, resolveExpression } from './evaluate';
+import { ConfigOverride, Repository, EvalContext } from "./kconfig";
+import { Token, makeExpr, tokenizeExpression, TokenKind } from './evaluate';
 
 export class PropFile {
 	actions: vscode.CodeAction[] = [];

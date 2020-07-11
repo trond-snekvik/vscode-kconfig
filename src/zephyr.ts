@@ -10,7 +10,6 @@ import * as yaml from 'yaml';
 import * as kEnv from './env';
 import * as glob from 'glob';
 import { Repository } from './kconfig';
-import * as child_process from 'child_process';
 
 const MODULE_FILE = vscode.Uri.parse('kconfig://zephyr/binary.dir/Kconfig.modules');
 export var isZephyr: boolean;

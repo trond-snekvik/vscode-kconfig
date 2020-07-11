@@ -67,6 +67,11 @@
 							"type": "string"
 						}
 					},
+					"kconfig.cfiles": {
+						"type": "boolean",
+						"description": "Enable Kconfig hover information and go to definition in C files",
+						"default": true
+					},
 					"kconfig.disable": {
 						"type": "boolean",
 						"description": "Disable Kconfig language features",
@@ -86,13 +91,11 @@
 					},
 					"kconfig.zephyr.west": {
 						"type": "string",
-						"description": "Location of the West tool",
-						"default": "west"
+						"description": "Location of the West tool"
 					},
-					"kconfig.cfiles": {
-						"type": "boolean",
-						"description": "Enable Kconfig hover information and go to definition in C files",
-						"default": true
+					"kconfig.zephyr.base": {
+						"type": "string",
+						"description": "Override location of Zephyr"
 					}
 				}
 			}

@@ -26,7 +26,7 @@ class KconfigLangHandler
 	operatorCompletions: vscode.CompletionItem[];
 	repo: Repository;
 	conf: ConfigOverride[];
-	temporaryRoot=false;
+	temporaryRoot: string | null;
 	rootChangeIgnore = new Array<string>();
 	propfileRefreshTimer?: NodeJS.Timeout;
 	constructor() {
@@ -65,6 +65,7 @@ class KconfigLangHandler
 
 		this.fileDiags = {};
 		this.propFiles = {};
+		this.temporaryRoot = null;
 		this.diags = vscode.languages.createDiagnosticCollection('kconfig');
 		this.repo = new Repository(this.diags);
 		zephyr.setRepo(this.repo);
@@ -78,11 +79,12 @@ class KconfigLangHandler
 			vscode.window.showInformationMessage(`A Kconfig file exists in this directory.\nChange the Kconfig root file?`, 'Temporarily', 'Permanently', 'Never').then(t => {
 				if (t === 'Temporarily') {
 					this.repo.setRoot(vscode.Uri.file(kconfigRoot));
-					this.rescan(false);
-					this.temporaryRoot = true;
+					this.rescan();
+					this.temporaryRoot = propFile.uri.fsPath;
 				} else if (t === 'Permanently') {
+					this.repo.setRoot(vscode.Uri.file(kconfigRoot));
 					kEnv.setConfig('root', kconfigRoot);
-				} else {
+				} else if (t === 'Never') {
 					this.rootChangeIgnore.push(kconfigRoot);
 				}
 			});
@@ -121,8 +123,9 @@ class KconfigLangHandler
 		disposable = vscode.window.onDidChangeActiveTextEditor(e => {
 			if (e?.document.languageId === 'properties') {
 				var file;
-				if (this.temporaryRoot) {
-					this.temporaryRoot = false;
+				if (this.temporaryRoot && this.temporaryRoot !== e.document.uri.fsPath) {
+					this.temporaryRoot = null;
+					this.repo.setRoot(kEnv.getRootFile());
 					this.rescan();
 					file = this.propFile(e.document.uri);
 				} else {
@@ -146,8 +149,9 @@ class KconfigLangHandler
 		disposable = vscode.workspace.onDidOpenTextDocument(d => {
 			if (d.languageId === 'properties') {
 				var file;
-				if (this.temporaryRoot) {
-					this.temporaryRoot = false;
+				if (this.temporaryRoot && this.temporaryRoot !== d.uri.fsPath) {
+					this.temporaryRoot = null;
+					this.repo.setRoot(kEnv.getRootFile());
 					this.rescan();
 					file = this.propFile(d.uri);
 				} else {
@@ -163,6 +167,9 @@ class KconfigLangHandler
 		disposable = vscode.workspace.onDidChangeConfiguration(e => {
 			if (e.affectsConfiguration('kconfig')) {
 				kEnv.update();
+				if (e.affectsConfiguration('kconfig.root')) {
+					this.repo.setRoot(kEnv.getRootFile());
+				}
 				this.rescan();
 			}
 		});
@@ -196,12 +203,12 @@ class KconfigLangHandler
 		return this.propFiles[uri.fsPath];
 	}
 
-	rescan(updateRoot=true) {
+	rescan() {
 		this.propFiles = {};
 		this.diags.clear();
 		this.repo.reset();
 
-		return this.doScan(updateRoot);
+		return this.doScan();
 	}
 
 	refreshOpenPropfiles() {
@@ -211,7 +218,13 @@ class KconfigLangHandler
 	}
 
 	activate(context: vscode.ExtensionContext) {
+		var root = kEnv.getRootFile();
+		if (!root) {
+			return;
+		}
+
 		this.registerHandlers(context);
+		this.repo.setRoot(root);
 		this.doScan();
 
 		if (vscode.window.activeTextEditor?.document.languageId === 'properties') {
@@ -219,18 +232,10 @@ class KconfigLangHandler
 		}
 	}
 
-	private doScan(updateRoot=true) {
+	private doScan() {
 		var hrTime = process.hrtime();
 
-		if (updateRoot) {
-			var root = kEnv.getRootFile();
-			if (root) {
-				this.repo.setRoot(root);
-				this.repo.parse();
-			}
-		} else {
-			this.repo.parse();
-		}
+		this.repo.parse();
 
 		hrTime = process.hrtime(hrTime);
 

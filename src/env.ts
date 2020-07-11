@@ -56,6 +56,7 @@ var env: { [name: string]: string };
 
 export function update() {
 	env = {};
+	config = vscode.workspace.getConfiguration("kconfig");
 	var conf = getConfig('env');
 	Object.keys(conf).forEach(k => env[k] = conf[k]);
 

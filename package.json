@@ -30,17 +30,11 @@
 	"contributes": {
 		"configuration": [
 			{
-				"title": "kconfig",
+				"title": "Kconfig",
 				"properties": {
 					"kconfig.root": {
 						"type": "string",
-						"description": "Root kconfig file to start indexing.",
-						"default": "Kconfig"
-					},
-					"kconfig.recursive": {
-						"type": "boolean",
-						"description": "Recursively parse Kconfig files that are included in parsed files",
-						"default": true
+						"description": "Root kconfig file to start indexing."
 					},
 					"kconfig.env": {
 						"type": "object",

@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2020 Trond Snekvik
+ *
+ * SPDX-License-Identifier: MIT
+ */
 import { Config, ConfigValue, ConfigValueType, ConfigOverride, Repository, EvalContext } from "./kconfig";
 
 

@@ -56,10 +56,11 @@
         },
         {
             "begin": "^\\s*(bool|tristate|string|hex|int)\\s+",
-            "end": "(\\s|$)",
+            "end": "(#|$)",
             "beginCaptures": {"1": {"name": "storage.type"}},
             "patterns": [
-                {"include": "#string"}
+                {"include": "#string"},
+                {"include": "#if"}
             ]
         },
         {

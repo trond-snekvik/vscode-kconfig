@@ -12,7 +12,7 @@ import * as glob from 'glob';
 import { Repository } from './kconfig';
 import * as child_process from 'child_process';
 
-const MODULE_FILE = vscode.Uri.parse('zephyr:/binary.dir/Kconfig.modules');
+const MODULE_FILE = vscode.Uri.parse('kconfig://zephyr/binary.dir/Kconfig.modules');
 export var isZephyr: boolean;
 export var zephyrRoot: string | undefined;
 
@@ -78,7 +78,7 @@ export function getConfig(name: string) {
 				BOARD_DIR: board.dir,
 				ARCH_DIR: "arch",
 				SOC_DIR: "soc",
-				CMAKE_BINARY_DIR: "zephyr:/binary.dir",
+				CMAKE_BINARY_DIR: "kconfig://zephyr/binary.dir",
 				TOOLCHAIN_KCONFIG_DIR: toolchain_kconfig_dir,
 				ZEPHYR_ROOT: zephyrRoot,
 				ZEPHYR_BASE: zephyrRoot,
@@ -202,9 +202,9 @@ function activateZephyr() {
 
 	var provider = new DocumentProvider();
 
-	vscode.workspace.registerTextDocumentContentProvider('zephyr', provider);
+	vscode.workspace.registerTextDocumentContentProvider('kconfig', provider);
 
-	kEnv.registerFileProvider('zephyr', provideDoc);
+	kEnv.registerFileProvider('kconfig', provideDoc);
 }
 
 async function getZephyrBase() {

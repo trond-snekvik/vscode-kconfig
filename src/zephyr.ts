@@ -166,7 +166,7 @@ class DocumentProvider implements vscode.TextDocumentContentProvider {
 	}
 }
 
-function activateZephyr() {
+function activateZephyr(context: vscode.ExtensionContext) {
 	boardStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 2);
 	boardStatus.text = `$(circuit-board) ${board.board}`;
 	boardStatus.command = 'kconfig.zephyr.setBoard';
@@ -181,7 +181,7 @@ function activateZephyr() {
 	};
 
 	toggleBoardStatus(vscode.window.activeTextEditor);
-	vscode.window.onDidChangeActiveTextEditor(toggleBoardStatus);
+	context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(toggleBoardStatus));
 
 	if (process.env['ZEPHYR_SDK_INSTALL_DIR']) {
 		var toolchain_dir = `${zephyrRoot}/cmake/toolchain/zephyr`;
@@ -202,7 +202,7 @@ function activateZephyr() {
 
 	var provider = new DocumentProvider();
 
-	vscode.workspace.registerTextDocumentContentProvider('kconfig', provider);
+	context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('kconfig', provider));
 
 	kEnv.registerFileProvider('kconfig', provideDoc);
 }
@@ -264,11 +264,11 @@ async function checkIsZephyr(): Promise<boolean> {
 	return !!(board?.board && board.arch && board.dir);
 }
 
-export async function activate() {
+export async function activate(context: vscode.ExtensionContext) {
 	var hrTime = process.hrtime();
 	isZephyr = await checkIsZephyr();
 	if (isZephyr) {
-		activateZephyr();
+		activateZephyr(context);
 
 		hrTime = process.hrtime(hrTime);
 
@@ -276,7 +276,7 @@ export async function activate() {
 		console.log(`Zephyr activation: ${time_ms} ms`);
 	}
 
-	vscode.commands.registerCommand('kconfig.zephyr.setBoard', () => {
+	context.subscriptions.push(vscode.commands.registerCommand('kconfig.zephyr.setBoard', () => {
 		if (isZephyr) {
 			selectBoard();
 		} else if (vscode.workspace.workspaceFolders) {
@@ -284,12 +284,12 @@ export async function activate() {
 		} else {
 			vscode.window.showWarningMessage('Zephyr must be opened as a folder or workspace.');
 		}
-	});
+	}));
 }
 
 var manifestWatcher: vscode.FileSystemWatcher;
 
-export function setRepo(repo: Repository) {
+export function setRepo(repo: Repository, context: vscode.ExtensionContext) {
 	west(['topdir'], (err, out) => {
 		if (!err) {
 			var conf = out.trim() + '/.west/config';
@@ -308,17 +308,17 @@ export function setRepo(repo: Repository) {
 						manifestWatcher.dispose();
 					}
 					manifestWatcher = vscode.workspace.createFileSystemWatcher(westManifest, true, false, true);
-
-					manifestWatcher.onDidChange(e => {
+					context.subscriptions.push(manifestWatcher);
+					context.subscriptions.push(manifestWatcher.onDidChange(e => {
 						repo.onDidChange(MODULE_FILE);
-					});
+					}));
 				});
 			};
 
-			vscode.workspace.createFileSystemWatcher(conf, true, false, true).onDidChange(e => {
+			context.subscriptions.push(vscode.workspace.createFileSystemWatcher(conf, true, false, true).onDidChange(e => {
 				repo.onDidChange(MODULE_FILE);
 				setupManifestWatcher();
-			});
+			}));
 
 			setupManifestWatcher();
 		}

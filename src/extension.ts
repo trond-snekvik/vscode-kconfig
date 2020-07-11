@@ -71,7 +71,6 @@ class KconfigLangHandler
 		this.temporaryRoot = null;
 		this.diags = vscode.languages.createDiagnosticCollection('kconfig');
 		this.repo = new Repository(this.diags);
-		zephyr.setRepo(this.repo);
 		this.conf = [];
 	}
 
@@ -209,6 +208,8 @@ class KconfigLangHandler
 		context.subscriptions.push(disposable);
 		disposable = vscode.languages.registerReferenceProvider(kconfig, this);
 		context.subscriptions.push(disposable);
+
+		this.repo.activate(context);
 	}
 
 	propFile(uri: vscode.Uri): PropFile {
@@ -234,6 +235,7 @@ class KconfigLangHandler
 	}
 
 	activate(context: vscode.ExtensionContext) {
+		zephyr.setRepo(this.repo, context);
 		var root = kEnv.getRootFile();
 		if (!root) {
 			return;
@@ -249,6 +251,12 @@ class KconfigLangHandler
 		if (vscode.window.activeTextEditor?.document.languageId === 'properties') {
 			this.suggestKconfigRoot(this.propFile(vscode.window.activeTextEditor.document.uri));
 		}
+	}
+
+	deactivate() {
+		this.propFiles = {};
+		this.diags.clear();
+		this.repo.reset();
 	}
 
 	private doScan() {
@@ -597,18 +605,22 @@ class KconfigLangHandler
 
 }
 
+var langHandler: KconfigLangHandler;
+
 export async function activate(context: vscode.ExtensionContext) {
 
-	await zephyr.activate();
+	await zephyr.activate(context);
 	kEnv.update();
 
 	if (!kEnv.isActive()) {
 		return;
 	}
 
-	var langHandler = new KconfigLangHandler();
+	langHandler = new KconfigLangHandler();
 
 	langHandler.activate(context);
 }
 
-export function deactivate() {}
+export function deactivate() {
+	langHandler?.deactivate();
+}

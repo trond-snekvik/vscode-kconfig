@@ -624,8 +624,10 @@ export class Repository {
 		this.openEditors.forEach(uri => this.setDiags(uri));
 		this.cachedConfigList = [];
 		this.rootScope = new RootScope(this);
+	}
 
-		vscode.window.onDidChangeVisibleTextEditors(e => {
+	activate(context: vscode.ExtensionContext) {
+		context.subscriptions.push(vscode.window.onDidChangeVisibleTextEditors(e => {
 			e = e.filter(e => e.document.languageId === 'kconfig');
 			var newUris = e.map(e => e.document.uri);
 			var removed = this.openEditors.filter(old => !newUris.some(uri => uri.fsPath === old.fsPath));
@@ -635,7 +637,7 @@ export class Repository {
 			added.forEach(add => this.setDiags(add));
 
 			this.openEditors = newUris;
-		});
+		}));
 	}
 
 	get configList() {
@@ -659,6 +661,7 @@ export class Repository {
 	}
 
 	reset() {
+		this.configs = {};
 		this.cachedConfigList = undefined;
 	}
 

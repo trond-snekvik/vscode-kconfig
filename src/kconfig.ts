@@ -173,6 +173,10 @@ export class RootScope extends Scope {
 	resolve(ctx: EvalContext) {
 		return true;
 	}
+
+	reset() {
+		this.children = [];
+	}
 }
 
 export class ConfigEntry {
@@ -650,6 +654,7 @@ export class Repository {
 
 	setRoot(uri: vscode.Uri) {
 		this.configs = {};
+		this.rootScope.reset();
 		this.root = new ParsedFile(this, uri, {}, this.rootScope);
 	}
 
@@ -661,6 +666,7 @@ export class Repository {
 	}
 
 	reset() {
+		this.rootScope.reset();
 		this.configs = {};
 		this.cachedConfigList = undefined;
 	}

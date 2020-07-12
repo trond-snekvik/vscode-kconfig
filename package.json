@@ -1,7 +1,7 @@
 {
 	"name": "kconfig-lang",
-	"displayName": "Kconfig",
-	"description": "Syntax highlighting, linting and intellisense for Kconfig",
+	"displayName": "Kconfig for the Zephyr Project",
+	"description": "Kconfig language support for the Zephyr Project",
 	"version": "1.1.5",
 	"publisher": "trond-snekvik",
 	"engines": {
@@ -20,6 +20,16 @@
 	"categories": [
 		"Programming Languages",
 		"Linters"
+	],
+	"bugs": {
+		"url": "https://github.com/trond-snekvik/kconfig-lang/issues"
+	},
+	"keywords": [
+		"Kconfig",
+		"Zephyr",
+		"NCS",
+		"nRF Connect",
+		"Zephyr RTOS"
 	],
 	"activationEvents": [
 		"onLanguage:kconfig",

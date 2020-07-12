@@ -130,12 +130,10 @@ export class ParsedFile {
 		return files;
 	}
 
-	parse(recursive=true) {
+	parse() {
 		this.parseRaw(kEnv.readFile(this.uri));
 
-		if (recursive) {
-			this.inclusions.forEach(i => i.file.parse(recursive));
-		}
+		this.inclusions.forEach(i => i.file.parse());
 	}
 
 	private parseRaw(text: string) {

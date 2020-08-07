@@ -550,7 +550,7 @@ class KconfigLangHandler
 					? addScope(c)
 					: new vscode.DocumentSymbol(
 							c.config.text ?? c.config.name,
-							c.config.text ? "" : c.config.name,
+							'',
 							c.config.symbolKind(),
 							new vscode.Range(c.lines.start, 0, c.lines.end, 9999),
 							new vscode.Range(c.lines.start, 0, c.lines.start, 9999)

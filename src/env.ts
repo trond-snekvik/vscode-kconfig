@@ -130,6 +130,10 @@ export function getWorkspaceRoot(file: string): string {
 }
 
 export function resolvePath(fileName: string, base?: string): vscode.Uri {
+	if (!fileName) {
+		return vscode.Uri.file('');
+	}
+
 	fileName = pathReplace(fileName);
 	if (fileName.match(/^\w{2,}:\//)) { // raw URI
 		return vscode.Uri.parse(fileName);

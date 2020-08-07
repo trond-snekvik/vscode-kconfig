@@ -206,7 +206,7 @@ function activateZephyr(context: vscode.ExtensionContext) {
 	kEnv.registerFileProvider('kconfig', provideDoc);
 }
 
-async function getZephyrBase() {
+function getZephyrBase() {
 	let base = kEnv.getConfig('zephyr.base');
 	if (base) {
 		return base;
@@ -216,7 +216,12 @@ async function getZephyrBase() {
 }
 
 async function checkIsZephyr(): Promise<boolean> {
-	zephyrRoot = kEnv.resolvePath(await getZephyrBase()).fsPath;
+	let base = getZephyrBase();
+	if (!base) {
+		return false;
+	}
+
+	zephyrRoot = kEnv.resolvePath(base).fsPath;
 	let hasWestYml = vscode.workspace.workspaceFolders?.some(f => fs.existsSync(f.uri.fsPath + "/west.yml") || fs.existsSync(f.uri.fsPath + "/.west/config"));
 	if (!hasWestYml && !zephyrRoot) {
 		return false;

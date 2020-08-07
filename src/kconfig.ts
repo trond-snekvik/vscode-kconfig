@@ -115,7 +115,7 @@ export class IfScope extends Scope {
 	rawExpr: string;
 	parent: Scope;
 	constructor(expression: string, repo: Repository, line: number, file: ParsedFile, parent: Scope) {
-		super('if', expression, repo, line, file, vscode.SymbolKind.Interface, parent);
+		super('if', expression, repo, line, file, vscode.SymbolKind.Module, parent);
 		/* Creating the expression now incurs a 30% performance penalty on parsing,
 		* but makes config file evaluation MUCH faster */
 		this.expr = createExpression(expression);

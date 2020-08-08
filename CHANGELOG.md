@@ -1,3 +1,26 @@
+# v1.1.6 Out-of-folder application support
+
+- Add support for applications outside the Zephyr folder
+       - Improved detection of local Kconfig files
+       - Prompt for using local Kconfig file when opening .prj-files
+       - Reworked detection of Zephyr to be a lot more liberal
+- Support unbraced variable replacements in file paths (e.g. `$ZEPHYR_BASE` in addition to `${ZEPHYR_BASE}`)
+- Support `$(KCONFIG_BINARY_DIR)` environment variable
+- Rework dependency detection in project files
+       - Now tries to suggest dependency additions recursively, forcing a clear path through the dependency tree down to the added config item
+       - Significantly improved performance on linting
+- Improved Kconfig file detection, excluding false positives
+- Add support for `if` after prompts in Kconfig files
+- Add extension deactivation
+- Bugfix: Provide workspace entries without prefix prompt
+- Provide language features in virtual files
+- Remove unused recursive configuration option
+- Fixed comments not being highlighted when trailing other symbols
+- Cleaner symbol views
+- Perform extension activation asynchronously
+- Bundle with webpack
+- Cleanup of repo in preparation for Extension Marketplace publication
+
 # v1.1.5
 
 - Support Windows paths in Zephyr modules

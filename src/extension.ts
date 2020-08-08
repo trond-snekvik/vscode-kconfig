@@ -582,7 +582,7 @@ class KconfigLangHandler
 		return entries.map(e => new vscode.SymbolInformation(
 			e.name,
 			vscode.SymbolKind.Property,
-			e.entries[0].scope?.name ?? '',
+			e.text ?? '',
 			e.entries[0].loc));
 	}
 

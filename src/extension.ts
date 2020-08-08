@@ -590,18 +590,18 @@ class KconfigLangHandler
 
 var langHandler: KconfigLangHandler;
 
-export async function activate(context: vscode.ExtensionContext) {
+export function activate(context: vscode.ExtensionContext) {
+	zephyr.activate(context).then(() => {
+		kEnv.update();
 
-	await zephyr.activate(context);
-	kEnv.update();
+		if (!kEnv.isActive()) {
+			return;
+		}
 
-	if (!kEnv.isActive()) {
-		return;
-	}
+		langHandler = new KconfigLangHandler();
 
-	langHandler = new KconfigLangHandler();
-
-	langHandler.activate(context);
+		langHandler.activate(context);
+	});
 }
 
 export function deactivate() {

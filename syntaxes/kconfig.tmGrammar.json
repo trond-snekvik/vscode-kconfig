@@ -6,10 +6,11 @@
         },
         {
             "begin": "^\\s*(if)\\s+",
-            "end": "(#|$)",
+            "end": "$",
             "beginCaptures": {"1": {"name": "keyword.control"}},
             "patterns": [
-                {"include": "#expression"}
+                {"include": "#expression"},
+                {"include": "#comment"}
             ]
         },
         {
@@ -18,21 +19,23 @@
         },
         {
             "begin": "^\\s*(config|menuconfig|choice|imply)\\s+",
-            "end": "(\\s|$|#)",
+            "end": "(\\s|$)",
             "beginCaptures": {"1": {"name": "keyword.control"}},
             "patterns": [
-                {"include": "#symbol"}
+                {"include": "#symbol"},
+                {"include": "#comment"}
             ]
         },
         {
             "begin": "^\\s*(range)\\s+",
-            "end": "(#|$)",
+            "end": "$",
             "beginCaptures": {
                 "1": {"name": "keyword.control"}
             },
             "patterns": [
                 {"include": "#if"},
-                {"include": "#expression"}
+                {"include": "#expression"},
+                {"include": "#comment"}
             ]
         },
         {
@@ -45,48 +48,53 @@
         },
         {
             "begin": "\\b(option)\\s+(defconfig_list|modules|allnoconfig_y)=?",
-            "end": "(#|$)",
+            "end": "$",
             "beginCaptures": {
                 "1": {"name": "keyword.control"},
                 "2": {"name": "support.variable"}
             },
             "patterns": [
-                {"include": "#expression"}
+                {"include": "#expression"},
+                {"include": "#comment"}
             ]
         },
         {
             "begin": "^\\s*(bool|tristate|string|hex|int)\\s+",
-            "end": "(#|$)",
+            "end": "$",
             "beginCaptures": {"1": {"name": "storage.type"}},
             "patterns": [
                 {"include": "#string"},
-                {"include": "#if"}
+                {"include": "#if"},
+                {"include": "#comment"}
             ]
         },
         {
             "begin": "^\\s*(visible if|depends on)\\s+",
-            "end": "(#|$)",
+            "end": "$",
             "beginCaptures": {"1": {"name": "keyword.control"}},
             "patterns": [
-                {"include": "#expression"}
+                {"include": "#expression"},
+                {"include": "#comment"}
             ]
         },
         {
             "begin": "^\\s*(select|default|def_bool|def_tristate)\\s+",
-            "end": "(#|$)",
+            "end": "$",
             "beginCaptures": {"1": {"name": "keyword.control"}},
             "patterns": [
                 {"include": "#if"},
-                {"include": "#expression"}
+                {"include": "#expression"},
+                {"include": "#comment"}
             ]
         },
         {
             "begin": "^\\s*(prompt|source|rsource|osource|mainmenu|menu|comment)\\s+",
-            "end": "(#|$)",
+            "end": "$",
             "beginCaptures": {"1": {"name": "keyword.control"}},
             "patterns": [
                 {"include": "#string"},
-                {"include": "#if"}
+                {"include": "#if"},
+                {"include": "#comment"}
             ]
         }
     ],

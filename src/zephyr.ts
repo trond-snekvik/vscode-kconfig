@@ -78,6 +78,7 @@ export function getConfig(name: string) {
 				ARCH_DIR: "arch",
 				SOC_DIR: "soc",
 				CMAKE_BINARY_DIR: "kconfig://zephyr/binary.dir",
+				KCONFIG_BINARY_DIR: "kconfig://zephyr/binary.dir",
 				TOOLCHAIN_KCONFIG_DIR: toolchain_kconfig_dir,
 				ZEPHYR_ROOT: zephyrRoot,
 				ZEPHYR_BASE: zephyrRoot,

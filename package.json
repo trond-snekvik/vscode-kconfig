@@ -34,7 +34,6 @@
 	"activationEvents": [
 		"onLanguage:kconfig",
 		"onLanguage:properties",
-		"onLanguage:c",
 		"workspaceContains:Kconfig"
 	],
 	"main": "./dist/extension.js",

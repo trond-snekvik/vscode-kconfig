@@ -207,49 +207,39 @@ function activateZephyr(context: vscode.ExtensionContext) {
 	kEnv.registerFileProvider('kconfig', provideDoc);
 }
 
-function getZephyrBase() {
-	let base = kEnv.getConfig('zephyr.base');
+function getZephyrBase(): string | undefined {
+	let base = kEnv.getConfig('zephyr.base') as string;
 	if (base) {
 		return base;
 	}
 
-	return process.env['ZEPHYR_BASE'];
+	return process.env['ZEPHYR_BASE'] as string;
+}
+
+function configZephyrBase() {
+	vscode.commands.executeCommand('workbench.action.openSettings', 'kconfig.zephyr.base');
 }
 
 async function checkIsZephyr(): Promise<boolean> {
-	let base = getZephyrBase();
+	let base = getZephyrBase() ??
+		await new Promise<string>(resolve => {
+			west(['topdir'], (err, out) => {
+				if (err) {
+					resolve(undefined);
+				} else {
+					resolve(`${out.trim()}/${west(['config', 'zephyr.base']).trim()}`);
+				}
+			});
+		});
 	if (!base) {
+		vscode.window.showErrorMessage('Unable to get west topdir.', 'Configure zephyr.base').then(e => configZephyrBase());
 		return false;
 	}
 
 	zephyrRoot = kEnv.resolvePath(base).fsPath;
-	let hasWestYml = vscode.workspace.workspaceFolders?.some(f => fs.existsSync(f.uri.fsPath + "/west.yml") || fs.existsSync(f.uri.fsPath + "/.west/config"));
-	if (!hasWestYml && !zephyrRoot) {
-		return false;
-	}
-
 	if (!zephyrRoot) {
-		let manifest: string | undefined = undefined;
-		await new Promise(resolve => {
-			west(['config', 'zephyr.base'], (err, out) => {
-				if (err) {
-					vscode.window.showErrorMessage('Unable to call west. Configure kconfig.zephyr.west.\n' + err.message);
-				} else {
-					manifest = out.trim();
-				}
-				resolve();
-			});
-		});
-
-		if (!manifest) {
-			return false;
-		}
-		let root = west(['topdir']);
-		if (!root) {
-			return false;
-		}
-
-		zephyrRoot = root.trim() + '/' + manifest;
+		vscode.window.showErrorMessage('Invalid Zephyr base: ' + base, 'Configure...').then(e => configZephyrBase());
+		return false;
 	}
 
 	board = kEnv.getConfig('zephyr.board');

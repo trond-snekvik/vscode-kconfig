@@ -26,31 +26,48 @@ class KconfigLangHandler
 	diags: vscode.DiagnosticCollection;
 	fileDiags: {[uri: string]: vscode.Diagnostic[]};
 	propFiles: { [uri: string]: PropFile };
-	operatorCompletions: vscode.CompletionItem[];
+	rootCompletions: vscode.CompletionItem[];
+	propertyCompletions: vscode.CompletionItem[];
 	repo: Repository;
 	conf: ConfigOverride[];
 	temporaryRoot: string | null;
 	rootChangeIgnore = new Array<string>();
 	propfileRefreshTimer?: NodeJS.Timeout;
 	constructor() {
-		this.operatorCompletions = [
-			new vscode.CompletionItem('if', vscode.CompletionItemKind.Keyword),
-			new vscode.CompletionItem('optional', vscode.CompletionItemKind.Keyword),
-			new vscode.CompletionItem('endif', vscode.CompletionItemKind.Keyword),
+		const sortItems = (item: vscode.CompletionItem, i: number) => {
+			const pad = '0000';
+			item.sortText = `root-${pad.slice(i.toString().length)}${i.toString()}`;
+			return item;
+		};
+		this.rootCompletions = [
+			new vscode.CompletionItem('config', vscode.CompletionItemKind.Class),
+			new vscode.CompletionItem('menuconfig', vscode.CompletionItemKind.Class),
+			new vscode.CompletionItem('choice', vscode.CompletionItemKind.Class),
 			new vscode.CompletionItem('endchoice', vscode.CompletionItemKind.Keyword),
+			new vscode.CompletionItem('if', vscode.CompletionItemKind.Module),
+			new vscode.CompletionItem('endif', vscode.CompletionItemKind.Keyword),
+			new vscode.CompletionItem('menu', vscode.CompletionItemKind.Module),
 			new vscode.CompletionItem('endmenu', vscode.CompletionItemKind.Keyword),
+			new vscode.CompletionItem('source', vscode.CompletionItemKind.File),
+			new vscode.CompletionItem('rsource', vscode.CompletionItemKind.File),
+			new vscode.CompletionItem('osource', vscode.CompletionItemKind.File),
+		].map(sortItems);
+
+		this.propertyCompletions = [
 			new vscode.CompletionItem('bool', vscode.CompletionItemKind.TypeParameter),
 			new vscode.CompletionItem('int', vscode.CompletionItemKind.TypeParameter),
 			new vscode.CompletionItem('hex', vscode.CompletionItemKind.TypeParameter),
 			new vscode.CompletionItem('tristate', vscode.CompletionItemKind.TypeParameter),
 			new vscode.CompletionItem('string', vscode.CompletionItemKind.TypeParameter),
-			new vscode.CompletionItem('config', vscode.CompletionItemKind.Keyword),
-			new vscode.CompletionItem('menu', vscode.CompletionItemKind.Keyword),
-			new vscode.CompletionItem('menuconfig', vscode.CompletionItemKind.Keyword),
-			new vscode.CompletionItem('choice', vscode.CompletionItemKind.Keyword),
-			new vscode.CompletionItem('depends on', vscode.CompletionItemKind.Keyword),
-			new vscode.CompletionItem('visible if', vscode.CompletionItemKind.Keyword),
-			new vscode.CompletionItem('default', vscode.CompletionItemKind.Keyword),
+			new vscode.CompletionItem('def_bool', vscode.CompletionItemKind.Variable),
+			new vscode.CompletionItem('def_int', vscode.CompletionItemKind.Variable),
+			new vscode.CompletionItem('def_hex', vscode.CompletionItemKind.Variable),
+			new vscode.CompletionItem('def_tristate', vscode.CompletionItemKind.Variable),
+			new vscode.CompletionItem('def_string', vscode.CompletionItemKind.Variable),
+			new vscode.CompletionItem('optional', vscode.CompletionItemKind.Property),
+			new vscode.CompletionItem('depends on', vscode.CompletionItemKind.Reference),
+			new vscode.CompletionItem('visible if', vscode.CompletionItemKind.Property),
+			new vscode.CompletionItem('default', vscode.CompletionItemKind.Property),
 		];
 
 		var range = new vscode.CompletionItem('range', vscode.CompletionItemKind.Keyword);
@@ -58,13 +75,15 @@ class KconfigLangHandler
 		range.insertText.appendPlaceholder('min');
 		range.insertText.appendText(' ');
 		range.insertText.appendPlaceholder('max');
-		this.operatorCompletions.push(range);
+		this.propertyCompletions.push(range);
 
 		var help = new vscode.CompletionItem('help', vscode.CompletionItemKind.Keyword);
 		help.insertText = new vscode.SnippetString('help\n  ');
 		help.insertText.appendTabstop();
 		help.commitCharacters = [' ', '\t', '\n'];
-		this.operatorCompletions.push(help);
+		this.propertyCompletions.push(help);
+
+		this.propertyCompletions = this.propertyCompletions.map(sortItems);
 
 		this.fileDiags = {};
 		this.propFiles = {};
@@ -373,15 +392,15 @@ class KconfigLangHandler
 
 	provideCompletionItems(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken, context: vscode.CompletionContext): vscode.ProviderResult<vscode.CompletionItem[] | vscode.CompletionList> {
 		var line = document.lineAt(position.line);
-		var wordRange = document.getWordRangeAtPosition(position);
-
-		var wordBase = wordRange ? document.getText(wordRange).slice(0, position.character).replace(/^CONFIG_/, '') : '';
-
 		var isProperties = (document.languageId === 'properties');
 		var items: vscode.CompletionItem[];
 
 		if (!isProperties && !line.text.match(/(if|depends\s+on|select|default|def_bool|def_tristate|def_int|def_hex|range)/)) {
-			return this.operatorCompletions;
+			if (line.firstNonWhitespaceCharacterIndex > 0) {
+				return this.propertyCompletions;
+			}
+
+			return this.rootCompletions;
 		}
 
 		if (isProperties) {

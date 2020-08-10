@@ -105,6 +105,13 @@
 					"kconfig.zephyr.base": {
 						"type": "string",
 						"description": "Override location of Zephyr"
+					},
+					"kconfig.zephyr.soc_roots": {
+						"type": "array",
+						"description": "Additional out-of-tree SoC root directories, as passed to CMake through -DSOC_ROOT",
+						"items": {
+							"type": "string"
+						}
 					}
 				}
 			}

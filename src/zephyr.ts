@@ -12,6 +12,9 @@ import * as glob from 'glob';
 import { Repository } from './kconfig';
 
 const MODULE_FILE = vscode.Uri.parse('kconfig://zephyr/binary.dir/Kconfig.modules');
+const SOC_FILE = vscode.Uri.parse('kconfig://zephyr/binary.dir/Kconfig.soc');
+const SOC_DEFCONFIG_FILE = vscode.Uri.parse('kconfig://zephyr/binary.dir/Kconfig.soc.defconfig');
+const SOC_ARCH_FILE = vscode.Uri.parse('kconfig://zephyr/binary.dir/Kconfig.soc.arch');
 export var isZephyr: boolean;
 export var zephyrRoot: string | undefined;
 
@@ -152,9 +155,30 @@ export function getModules() {
 	}
 }
 
+function getKconfigSocRoots() {
+	let additional_roots = kEnv.getConfig('kconfig.zephyr.soc_roots') as string[] | undefined;
+	if (additional_roots) {
+		return [
+			zephyrRoot,
+			...additional_roots,
+		];
+	}
+
+	return [zephyrRoot];
+}
+
 function provideDoc(uri: vscode.Uri) {
 	if (uri.toString() === MODULE_FILE.toString()) {
 		return getKconfigRoots().map(root => `osource "${root}"`).join('\n\n');
+	}
+	if (uri.toString() === SOC_DEFCONFIG_FILE.toString()) {
+		return getKconfigSocRoots().map(root => `osource "${root}/soc/$(ARCH)/*/Kconfig.defconfig"`).join('\n');
+	}
+	if (uri.toString() === SOC_FILE.toString()) {
+		return getKconfigSocRoots().map(root => `osource "${root}/soc/$(ARCH)/*/Kconfig.soc"`).join('\n');
+	}
+	if (uri.toString() === SOC_ARCH_FILE.toString()) {
+		return getKconfigSocRoots().map(root => `osource "${root}/soc/$(ARCH)/Kconfig"\nosource "${root}/soc/$(ARCH)/*/Kconfig"`).join('\n');
 	}
 	return '';
 }

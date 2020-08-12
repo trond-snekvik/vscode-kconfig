@@ -1,3 +1,10 @@
+# v1.1.7 Multiple SOC roots
+
+- Add support for multiple SOC roots through a config entry. By default, only the zephyr repo's SOC directory is included.
+- Contextual filtering of keyword completion items in kconfig files
+- New icon, inspired by the Zephyr documentation page
+- Add the most common Kconfig filenames to the list of associated filenames
+
 # v1.1.6 Out-of-folder application support
 
 - Add support for applications outside the Zephyr folder

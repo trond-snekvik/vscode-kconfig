@@ -2,7 +2,7 @@
 	"name": "kconfig-lang",
 	"displayName": "Kconfig for the Zephyr Project",
 	"description": "Kconfig language support for the Zephyr Project",
-	"version": "1.1.6",
+	"version": "1.1.7",
 	"publisher": "trond-snekvik",
 	"engines": {
 		"vscode": "^1.37.0"

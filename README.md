@@ -70,6 +70,8 @@ Assuming that the Zephyr Project environment is set up
 [with West](https://docs.zephyrproject.org/latest/getting_started/index.html#get-the-source-code),
 the extension will just work without any configuration needed.
 
+> Note: The extension requires West version 0.7.0 and newer to work out of the box. For older versions of West, the Zephyr base directory has to be configured manually.
+
 The entire Kconfig tree (including external modules) is parsed on startup,
 and all features will be available as soon as the parsing is complete. This typically takes only 1-2 seconds
 after the extension has been activated, and if everything went smoothly, a report will pop up in the

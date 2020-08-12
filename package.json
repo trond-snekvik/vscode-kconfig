@@ -131,7 +131,14 @@
 				],
 				"filenames": [
 					"Kconfig",
-					"Kconfig.zephyr"
+					"Kconfig.zephyr",
+					"Kconfig.defconfig",
+					"Kconfig.soc.defconfig",
+					"Kconfig.soc",
+					"Kconfig.board",
+					"Kconfig.shield",
+					"Kconfig.nrf",
+					"Kconfig.stm32"
 				],
 				"configuration": "./language-configuration.json"
 			}

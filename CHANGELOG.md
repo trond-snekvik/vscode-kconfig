@@ -1,3 +1,18 @@
+# v1.1.8 Force Zephyr resolution
+
+- Block the language handling until Zephyr is resolved
+  - Notify user when West isn't found
+  - Retry Zephyr resolution when kconfig.zephyr.* config changes
+- Reparse entire tree on git and west changes
+- Prefix workspace symbols with CONFIG_
+- Permit unresolved macros in range properties
+- Permit orsource statements
+- Disable extension in file mode
+- Bugfix: Wipe cache on changes, should remove change-based crashes
+- Bugfix: Fix invalid guess for west location on linux, should reduce chances of needing to manually configure west
+- Bugfix: Choice scopes were not carried through source includes
+- Bugfix: User configured environment and conf files were ignored when Zephyr had its own
+
 # v1.1.7 Multiple SOC roots
 
 - Add support for multiple SOC roots through a config entry. By default, only the zephyr repo's SOC directory is included.

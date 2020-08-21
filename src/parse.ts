@@ -191,14 +191,14 @@ export class ParsedFile {
 		const defStringMatch = /^\s*def_string\s+"((?:.*?[^\\])?)"(?:\s+if\s+([^#]+))?/;
 		const rangeMatch     = /^\s*range\s+([\-+]?\w+|\$\(.*?\))\s+([\-+]?\w+|\$\(.*?\))(?:\s+if\s+([^#]+))?/;
 
-		var entry: ConfigEntry | null = null;
-		var comment: Comment | null = null;
-		var help = false;
-		var helpIndent: string | null = null;
-		for (var lineNumber = 0; lineNumber < lines.length; lineNumber++) {
-			var line = kEnv.replace(lines[lineNumber], env);
+		let entry: ConfigEntry | null = null;
+		let comment: Comment | null = null;
+		let help = false;
+		let helpIndent: string | null = null;
+		for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
+			let line = kEnv.replace(lines[lineNumber], env);
 
-			var startLineNumber = lineNumber;
+			let startLineNumber = lineNumber;
 
 			/* If lines end with \, the line ending should be ignored: */
 			while (line.endsWith('\\') && lineNumber < lines.length - 1) {
@@ -212,10 +212,10 @@ export class ParsedFile {
 				continue;
 			}
 
-			var lineRange = new vscode.Range(startLineNumber, 0, lineNumber, line.length);
+			let lineRange = new vscode.Range(startLineNumber, 0, lineNumber, line.length);
 
 			if (help) {
-				var indent = line.replace(/\t/g, ' '.repeat(8)).match(/^\s*/)![0];
+				let indent = line.replace(/\t/g, ' '.repeat(8)).match(/^\s*/)![0];
 				if (helpIndent === null) {
 					helpIndent = indent;
 				}
@@ -240,9 +240,9 @@ export class ParsedFile {
 				continue;
 			}
 
-			var name: string;
-			var match = line.match(configMatch);
-			var c: Config;
+			let name: string;
+			let match = line.match(configMatch);
+			let c: Config;
 			if (match) {
 				name = match[2];
 				if (name in this.repo.configs) {
@@ -348,7 +348,7 @@ export class ParsedFile {
 			}
 			match = line.match(depOnMatch);
 			if (match) {
-				var depOn = match[1].trim().replace(/\s+/g, ' ');
+				let depOn = match[1].trim().replace(/\s+/g, ' ');
 				if (entry) {
 					entry.extend(lineNumber);
 
@@ -389,7 +389,7 @@ export class ParsedFile {
 				continue;
 			}
 
-			var noEntryDiag = new vscode.Diagnostic(lineRange, `Token is only valid in an entry context`, vscode.DiagnosticSeverity.Warning);
+			let noEntryDiag = new vscode.Diagnostic(lineRange, `Token is only valid in an entry context`, vscode.DiagnosticSeverity.Warning);
 
 			match = line.match(typeMatch);
 			if (match) {
@@ -439,7 +439,7 @@ export class ParsedFile {
 				continue;
 			}
 
-			var ifStatement;
+			let ifStatement;
 			match = line.match(defaultMatch);
 			if (match) {
 				if (!entry) {

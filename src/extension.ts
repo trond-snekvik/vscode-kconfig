@@ -6,10 +6,11 @@
 import * as vscode from 'vscode';
 import * as fuzzy from "fuzzysort";
 import { Operator } from './evaluate';
-import { Config, ConfigOverride, ConfigEntry, Repository, IfScope, Scope, Comment } from "./kconfig";
+import { Config, ConfigOverride, ConfigEntry, Repository, IfScope, Scope, Comment, EvalContext } from "./kconfig";
 import * as kEnv from './env';
 import * as zephyr from './zephyr';
 import { PropFile } from './propfile';
+import { Menuconfig } from './menuconfig';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -33,6 +34,7 @@ class KconfigLangHandler
 	temporaryRoot: string | null;
 	rootChangeIgnore = new Array<string>();
 	rescanTimer?: NodeJS.Timeout;
+	menuconfig?: Menuconfig;
 	constructor() {
 		const sortItems = (item: vscode.CompletionItem, i: number) => {
 			const pad = '0000';
@@ -221,6 +223,25 @@ class KconfigLangHandler
 		context.subscriptions.push(disposable);
 		disposable = vscode.languages.registerReferenceProvider(kconfig, this);
 		context.subscriptions.push(disposable);
+
+		vscode.commands.registerCommand('kconfig.menuconfig', (uri?: vscode.Uri) => {
+			if (!uri) {
+				if (!vscode.window.activeTextEditor) {
+					vscode.window.showErrorMessage('Menuconfig needs a property file');
+					return;
+				}
+
+				uri = vscode.window.activeTextEditor.document.uri;
+			}
+
+			let file = this.propFiles[uri.fsPath];
+			if (!file) {
+				return;
+			}
+
+			this.menuconfig = new Menuconfig(new EvalContext(this.repo, file.overrides));
+			this.menuconfig.render();
+		});
 
 		this.repo.activate(context);
 	}

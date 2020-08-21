@@ -124,6 +124,14 @@
 				"command": "kconfig.zephyr.setBoard",
 				"title": "Kconfig: Set board for Zephyr",
 				"enablement": "workspaceFolderCount > 0"
+			},
+			{
+				"command": "kconfig.menuconfig",
+				"title": "Menuconfig",
+				"icon":{
+					"dark": "doc/menuconfig_dark.svg",
+					"light": "doc/menuconfig_light.svg"
+				}
 			}
 		],
 		"languages": [
@@ -152,7 +160,16 @@
 				"scopeName": "source.kconfig",
 				"path": "./syntaxes/kconfig.tmGrammar.json"
 			}
-		]
+		],
+		"menus": {
+			"editor/title": [
+				{
+					"command": "kconfig.menuconfig",
+					"when": "resourceLangId == properties",
+					"group": "1_run"
+				}
+			]
+		}
 	},
 	"scripts": {
 		"vscode:prepublish": "webpack --mode production",

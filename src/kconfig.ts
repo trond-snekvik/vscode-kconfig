@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 import * as vscode from 'vscode';
-import { resolveExpression, createExpression, Expression } from './evaluate';
+import { resolveExpression, createExpression, Expression, Operator } from './evaluate';
 import { ParsedFile } from './parse';
 
 export type ConfigValue = string | number | boolean;
@@ -157,6 +157,7 @@ export class ChoiceScope extends Scope {
 	constructor(choice: ChoiceEntry) {
 		super('choice', choice.config.name, choice.config.repo, choice.lines.start, choice.file, vscode.SymbolKind.Enum, choice.scope);
 		this.choice = choice;
+		this.choice.choiceScope = this;
 		this.parent = choice.scope;
 	}
 
@@ -597,6 +598,7 @@ export class Config {
 export class ChoiceEntry extends ConfigEntry {
 	choices: Config[];
 	optional = false;
+	choiceScope?: ChoiceScope;
 
 	constructor(name: string, line: number, repo: Repository, file: ParsedFile, scope: Scope) {
 		super(new Config(name, 'choice', repo), line, file, scope);
@@ -619,6 +621,8 @@ export class ChoiceEntry extends ConfigEntry {
 		}
 	}
 }
+
+export type EntryTreeItem = { entry: ConfigEntry | Scope | Comment, children: EntryTreeItem[] };
 
 export class Repository {
 	configs: {[name: string]: Config};
@@ -712,7 +716,7 @@ export class Repository {
 		hrTime = process.hrtime(hrTime);
 
 		this.openEditors.forEach(uri => this.setDiags(uri));
-		if (vscode.debug.activeDebugSession) {
+		if (vscode.debug.activeDebugConsole) {
 			console.log(`Handled changes to ${files.length} versions of ${uri.fsPath} in ${hrTime[0] * 1000 + hrTime[1] / 1000000} ms.`);
 			this.printStats();
 		}
@@ -731,7 +735,70 @@ export class Repository {
 		var entriesS = scopeEntries(this.rootScope);
 		console.log(`\tEntries from scopes: ${entriesS.length}`);
 
+		let noEntries = this.configList.filter(c => c.entries.length === 0);
+		if (noEntries.length > 0) {
+			console.log(`${noEntries.length} has no entries!`);
+		}
+
 		// console.log(`\tMissing Scope entries: ${entriesC.filter(e => !entriesS.includes(e)).map(e => e.config.name)}`);
 		// console.log(`\tMissing Config entries: ${entriesS.filter(e => !entriesC.includes(e)).map(e => e.config.name)}`);
+	}
+
+	createTree(uri?: vscode.Uri): EntryTreeItem[] {
+		var file: ParsedFile | undefined;
+		if (uri) {
+			file = this.files.find(f => f.uri.fsPath === uri.fsPath);
+			if (!file) {
+				return [];
+			}
+		}
+
+		var getName = (e: ConfigEntry | Scope | Comment) => {
+			if (e instanceof ChoiceEntry && e.choiceScope) {
+				return e.choiceScope.name;
+			}
+			if (e instanceof ConfigEntry) {
+				return e.config.name;
+			}
+			if (e instanceof Scope) {
+				return e.name;
+			}
+			if (e instanceof Comment) {
+				return e.text;
+			}
+		};
+
+		var addScope = (scope: Scope): EntryTreeItem => {
+			var name: string = scope.name;
+			if ((scope instanceof IfScope) && (scope.expr?.operator === Operator.VAR)) {
+				var config = this.configs[scope.expr.var!.value];
+				name = config?.text ?? config?.name ?? scope.name;
+			}
+
+			var symbol = <EntryTreeItem>{ entry: scope, children: [] };
+
+			symbol.children = scope.children.filter(c => !uri || c.file === file)
+				.map(c =>
+					(c instanceof Scope)
+						? addScope(c)
+						: <EntryTreeItem>{ entry: c, children: [] }
+				)
+				.reduce((prev, curr) => {
+					if (prev.length > 0 && getName(curr.entry) === getName(prev[prev.length - 1].entry)) {
+						if (curr.entry instanceof ChoiceScope) {
+							prev.pop();
+						} else {
+							prev[prev.length - 1].children.push(...curr.children);
+							return prev;
+						}
+					}
+
+					return [...prev, curr];
+				}, new Array<EntryTreeItem>());
+
+			return symbol;
+		};
+
+		return addScope(uri ? file!.scope : this.rootScope).children;
 	}
 }

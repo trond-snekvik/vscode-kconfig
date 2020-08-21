@@ -312,7 +312,7 @@ export class PropFile {
 				let overrides = new Array<ConfigOverride>();
 				missingDependencies.forEach(missingDependency => {
 					var dep = ctx.repo.configs[missingDependency.replace(/[!() ]/g, '')];
-					if (dep) {
+					if (dep?.entries?.length) {
 						diag.relatedInformation!.push(new vscode.DiagnosticRelatedInformation(dep.entries[0].loc, `${dep.name} declared here`));
 					}
 

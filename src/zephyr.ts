@@ -261,7 +261,11 @@ async function checkIsZephyr(): Promise<boolean> {
 	if (!await new Promise<boolean>(resolve => {
 		west(['-V'], (err, out) => {
 			if (err) {
-				vscode.window.showErrorMessage('Unable to run west', 'Configure zephyr.west').then(() => openConfig('kconfig.zephyr.west'));
+				vscode.window.showErrorMessage('Unable to run West', 'Configure West location').then(e => {
+					if (e) {
+						openConfig('kconfig.zephyr.west');
+					}
+				});
 				resolve(false);
 			} else {
 				let match = out.match(/v\d+\.\d+.\d+/);
@@ -287,13 +291,21 @@ async function checkIsZephyr(): Promise<boolean> {
 			});
 		});
 	if (!base) {
-		vscode.window.showErrorMessage('Unable to get west topdir.', 'Configure zephyr.base').then(e => configZephyrBase());
+		vscode.window.showErrorMessage('Unable to get west topdir.', 'Configure zephyr.base').then(e => {
+			if (e) {
+				configZephyrBase();
+			}
+		});
 		return false;
 	}
 
 	zephyrRoot = kEnv.resolvePath(base).fsPath;
 	if (!zephyrRoot) {
-		vscode.window.showErrorMessage('Invalid Zephyr base: ' + base, 'Configure...').then(e => configZephyrBase());
+		vscode.window.showErrorMessage('Invalid Zephyr base: ' + base, 'Configure...').then(e => {
+			if (e) {
+				configZephyrBase();
+			}
+		});
 		return false;
 	}
 
@@ -346,8 +358,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 			var time_ms = Math.round(hrTime[0] * 1000 + hrTime[1] / 1000000);
 			console.log(`Zephyr activation: ${time_ms} ms`);
 		} else if (zephyrRoot) {
-			vscode.window.showErrorMessage(`Kconfig: Couldn't find board`, 'Configure').then(() => {
-				openConfig('kconfig.zephyr.board');
+			vscode.window.showErrorMessage(`Kconfig: Couldn't find board`, 'Configure').then(e => {
+				if (e) {
+					openConfig('kconfig.zephyr.board');
+				}
 			});
 		}
 

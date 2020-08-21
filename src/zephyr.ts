@@ -345,6 +345,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 			var time_ms = Math.round(hrTime[0] * 1000 + hrTime[1] / 1000000);
 			console.log(`Zephyr activation: ${time_ms} ms`);
+		} else if (zephyrRoot) {
+			vscode.window.showErrorMessage(`Kconfig: Couldn't find board`, 'Configure').then(() => {
+				openConfig('kconfig.zephyr.board');
+			});
 		}
 
 		return isZephyr;
@@ -352,7 +356,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 	await run();
 	if (isZephyr) {
-		return Promise.resolve();
+		return;
 	}
 
 	return new Promise(resolve => {

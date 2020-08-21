@@ -95,6 +95,9 @@
 							},
 							"arch": {
 								"type": "string"
+							},
+							"dir": {
+								"type": "string"
 							}
 						}
 					},

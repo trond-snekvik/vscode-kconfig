@@ -318,6 +318,10 @@ class KconfigLangHandler
 		});
 
 		var conf_files: string[] = kEnv.getConfig('conf_files');
+		if (!conf_files?.length) {
+			conf_files = zephyr.getConfig('conf_files') as string[];
+		}
+
 		if (conf_files) {
 			conf_files.forEach(f => {
 				try {
@@ -357,7 +361,7 @@ class KconfigLangHandler
 	}
 
 	provideDefinition(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken): vscode.ProviderResult<vscode.Location | vscode.Location[] | vscode.LocationLink[]> {
-		if (document.languageId === 'c' && !(kEnv.getConfig('kconfig.cfiles') ?? true)) {
+		if (document.languageId === 'c' && !kEnv.getConfig('cfiles')) {
 			return null;
 		}
 
@@ -373,7 +377,7 @@ class KconfigLangHandler
 	}
 
 	provideHover(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken): vscode.ProviderResult<vscode.Hover> {
-		if (document.languageId === 'c' && !(kEnv.getConfig('kconfig.cfiles') ?? true)) {
+		if (document.languageId === 'c' && !kEnv.getConfig('cfiles')) {
 			return null;
 		}
 
@@ -618,6 +622,10 @@ class KconfigLangHandler
 var langHandler: KconfigLangHandler;
 
 export function activate(context: vscode.ExtensionContext) {
+	if (kEnv.getConfig('disable')) {
+		return;
+	}
+
 	zephyr.activate(context).then(() => {
 		kEnv.update();
 

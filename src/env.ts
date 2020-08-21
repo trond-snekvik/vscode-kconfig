@@ -8,18 +8,10 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as zephyr from './zephyr';
 
-var config = vscode.workspace.getConfiguration("kconfig");
+var config = vscode.workspace.getConfiguration('kconfig');
 
 export function getConfig(name: string): any {
-	var conf = config.get(name);
-
-	if (conf !== undefined && zephyr.isZephyr) {
-		var value = zephyr.getConfig(name);
-		if (value !== undefined) {
-			return value;
-		}
-	}
-	return conf;
+	return config.get(name);
 }
 
 export function setConfig(name: string, value: any) {
@@ -30,7 +22,7 @@ export function getRootFile(): vscode.Uri {
 	var root = getConfig('root');
 	if (!root) {
 		if (zephyr.isZephyr) {
-			root = '${ZEPHYR_BASE}/Kconfig';
+			root = zephyr.zephyrRoot + '/Kconfig';
 		} else {
 			root = '${workspaceFolder}/Kconfig';
 		}
@@ -49,7 +41,7 @@ export function getRoot() {
 }
 
 export function isActive(): boolean {
-	if (getConfig('disabled')) {
+	if (getConfig('disable')) {
 		return false;
 	}
 
@@ -60,10 +52,10 @@ export function isActive(): boolean {
 var env: { [name: string]: string };
 
 export function update() {
-	env = {};
-	config = vscode.workspace.getConfiguration("kconfig");
-	var conf = getConfig('env');
-	Object.keys(conf).forEach(k => env[k] = conf[k]);
+	config = vscode.workspace.getConfiguration('kconfig');
+	env = <{}>zephyr.getConfig('env') ?? {};
+	let userConf = getConfig('env');
+	Object.keys(userConf).forEach(k => env[k] = userConf[k]);
 
 	try {
 		Object.keys(env).forEach(key => {

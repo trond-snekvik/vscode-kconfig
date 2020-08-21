@@ -4,4 +4,6 @@ out/
 src/
 tsconfig.json
 webpack.config.js
-dist/*.map
+dist/test
+.gitignore
+tslint.json

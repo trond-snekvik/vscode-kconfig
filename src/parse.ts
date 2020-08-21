@@ -141,6 +141,9 @@ export class ParsedFile {
 		var choice: ChoiceEntry | null = null;
 		var env = {...this.env};
 		var scope = this.scope;
+		if (scope instanceof ChoiceScope) {
+			choice = scope.choice;
+		}
 
 		var lines = text.split(/\r?\n/g);
 		if (!lines) {

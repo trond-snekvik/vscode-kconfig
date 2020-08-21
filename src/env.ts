@@ -14,8 +14,8 @@ export function getConfig(name: string): any {
 	return config.get(name);
 }
 
-export function setConfig(name: string, value: any) {
-	config.update(name, value, vscode.ConfigurationTarget.Workspace);
+export function setConfig(name: string, value: any, target=vscode.ConfigurationTarget.Workspace) {
+	config.update(name, value, target);
 }
 
 export function getRootFile(): vscode.Uri {

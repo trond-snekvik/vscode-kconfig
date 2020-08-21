@@ -11,6 +11,7 @@ import * as kEnv from './env';
 import * as glob from 'glob';
 import * as path from 'path';
 import { env } from 'process';
+import { countReset } from 'console';
 
 const MODULE_FILE = vscode.Uri.parse('kconfig://zephyr/binary.dir/Kconfig.modules');
 const SOC_FILE = vscode.Uri.parse('kconfig://zephyr/binary.dir/Kconfig.soc');
@@ -343,7 +344,28 @@ function findWest() {
 	}
 }
 
-export async function activate(context: vscode.ExtensionContext): Promise<void> {
+export async function activate(context: vscode.ExtensionContext): Promise<boolean> {
+	if (!vscode.workspace.workspaceFolders) {
+		let warning = (doc: vscode.TextDocument) => {
+			if (doc.languageId === 'kconfig' || (doc.languageId === 'plaintext' && doc.fileName.startsWith('Kconfig.'))) {
+				vscode.window.showWarningMessage(`The Kconfig extension only runs in VS Code Workspaces and folders.`, 'Open folder...', 'Disable extension').then(e => {
+					if (e === 'Open folder...') {
+						vscode.commands.executeCommand('vscode.openFolder');
+					} else if (e === 'Disable extension') {
+						kEnv.setConfig('disable', true, vscode.ConfigurationTarget.Global);
+					}
+				});
+			}
+		};
+
+		context.subscriptions.push(vscode.workspace.onDidOpenTextDocument(warning));
+		if (vscode.window.activeTextEditor?.document) {
+			warning(vscode.window.activeTextEditor?.document);
+		}
+
+		return false;
+	}
+
 	let run = async () => {
 
 		findWest();
@@ -368,19 +390,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		return isZephyr;
 	};
 
-	await run();
-	if (isZephyr) {
-		return;
+	if (await run()) {
+		return true;
 	}
 
-	return new Promise(resolve => {
+	return new Promise<boolean>(resolve => {
 		let disposable = vscode.workspace.onDidChangeConfiguration(e => {
 			if (!isZephyr && e.affectsConfiguration('kconfig.zephyr')) {
 				kEnv.update();
 				run().then(worked => {
 					if (worked && zephyrRoot) {
 						vscode.window.showInformationMessage(`Found Zephyr in ${zephyrRoot}`);
-						resolve();
+						resolve(true);
 					}
 				});
 			}

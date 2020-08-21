@@ -626,7 +626,11 @@ export function activate(context: vscode.ExtensionContext) {
 		return;
 	}
 
-	zephyr.activate(context).then(() => {
+	zephyr.activate(context).then(foundZephyr => {
+		if (!foundZephyr) {
+			return;
+		}
+
 		kEnv.update();
 
 		if (!kEnv.isActive()) {

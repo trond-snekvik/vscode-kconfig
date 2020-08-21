@@ -10,7 +10,6 @@ import * as yaml from 'yaml';
 import * as kEnv from './env';
 import * as glob from 'glob';
 import * as path from 'path';
-import { Repository } from './kconfig';
 import { env } from 'process';
 
 const MODULE_FILE = vscode.Uri.parse('kconfig://zephyr/binary.dir/Kconfig.modules');
@@ -20,17 +19,10 @@ const SOC_ARCH_FILE = vscode.Uri.parse('kconfig://zephyr/binary.dir/Kconfig.soc.
 export var isZephyr: boolean;
 export var zephyrRoot: string | undefined;
 var westVersion: string;
+var westExe: string;
 
 function west(args: string[], callback?: (err: ExecException | null, stdout: string) => void): string {
-	var exe = kEnv.getConfig('zephyr.west');
-	if (!exe) {
-		if (process.platform === 'win32') {
-			exe = 'west';
-		} else {
-			exe = env['HOME'] + '/.local/bin/west';
-		}
-	}
-	var command = exe + ' ' + args.join(' ');
+	var command = westExe + ' ' + args.join(' ');
 
 	const options: ExecOptions = {
 		cwd: zephyrRoot ?? vscode.workspace.workspaceFolders?.find(w => w.name.match(/zephyr/i))?.uri.fsPath ?? vscode.workspace.workspaceFolders?.[0].uri.fsPath,
@@ -41,7 +33,7 @@ function west(args: string[], callback?: (err: ExecException | null, stdout: str
 		exec(command, options, callback);
 	} else {
 		try {
-			return execSync(exe + ' ' + args.join(' '), options).toString('utf-8');
+			return execSync(westExe + ' ' + args.join(' '), options).toString('utf-8');
 		} catch (e) {
 			return e.toString();
 		}
@@ -322,8 +314,27 @@ async function checkIsZephyr(): Promise<boolean> {
 	return !!(board?.board && board.arch && board.dir);
 }
 
+function findWest() {
+	westExe = kEnv.getConfig('zephyr.west');
+	if (westExe) {
+		return;
+	}
+
+	if (process.platform === 'win32') {
+		westExe = 'west';
+	} else {
+		let candidates = [];
+		candidates.push(env['HOME'] + '/.local/bin/west'); // installed with --user
+		candidates.push('/usr/bin/west');
+		candidates.push('/usr/local/bin/west');
+		westExe = candidates.find(p => fs.existsSync(p)) ?? 'west';
+	}
+}
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
 	let run = async () => {
+
+		findWest();
 
 		var hrTime = process.hrtime();
 		isZephyr = await checkIsZephyr();

@@ -9,6 +9,7 @@ import { execSync, exec, ExecException, ExecOptions } from 'child_process';
 import * as yaml from 'yaml';
 import * as kEnv from './env';
 import * as glob from 'glob';
+import * as path from 'path';
 import { Repository } from './kconfig';
 import { env } from 'process';
 
@@ -18,6 +19,7 @@ const SOC_DEFCONFIG_FILE = vscode.Uri.parse('kconfig://zephyr/binary.dir/Kconfig
 const SOC_ARCH_FILE = vscode.Uri.parse('kconfig://zephyr/binary.dir/Kconfig.soc.arch');
 export var isZephyr: boolean;
 export var zephyrRoot: string | undefined;
+var westVersion: string;
 
 function west(args: string[], callback?: (err: ExecException | null, stdout: string) => void): string {
 	var exe = kEnv.getConfig('zephyr.west');
@@ -225,6 +227,16 @@ function activateZephyr(context: vscode.ExtensionContext) {
 		}
 	}
 
+	context.subscriptions.push(vscode.commands.registerCommand('kconfig.zephyr.setBoard', () => {
+		if (isZephyr) {
+			selectBoard();
+		} else if (vscode.workspace.workspaceFolders) {
+			vscode.window.showWarningMessage('Not in a Zephyr workspace.');
+		} else {
+			vscode.window.showWarningMessage('Zephyr must be opened as a folder or workspace.');
+		}
+	}));
+
 	var provider = new DocumentProvider();
 
 	context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('kconfig', provider));
@@ -235,17 +247,43 @@ function activateZephyr(context: vscode.ExtensionContext) {
 function getZephyrBase(): string | undefined {
 	let base = kEnv.getConfig('zephyr.base') as string;
 	if (base) {
-		return base;
+		if (env['HOME']) {
+			base = base.replace(/^~\//, env['HOME'] as string + '/');
+		}
+
+		return path.resolve(base);
 	}
 
 	return process.env['ZEPHYR_BASE'] as string;
 }
 
+function openConfig(entry: string) {
+	vscode.commands.executeCommand('workbench.action.openSettings', entry);
+}
+
 function configZephyrBase() {
-	vscode.commands.executeCommand('workbench.action.openSettings', 'kconfig.zephyr.base');
+	openConfig('kconfig.zephyr.base');
 }
 
 async function checkIsZephyr(): Promise<boolean> {
+	if (!await new Promise<boolean>(resolve => {
+		west(['-V'], (err, out) => {
+			if (err) {
+				vscode.window.showErrorMessage('Unable to run west', 'Configure zephyr.west').then(() => openConfig('kconfig.zephyr.west'));
+				resolve(false);
+			} else {
+				let match = out.match(/v\d+\.\d+.\d+/);
+				if (match) {
+					westVersion = match[0];
+				}
+				resolve(true);
+			}
+
+		});
+	})) {
+		return false;
+	}
+
 	let base = getZephyrBase() ??
 		await new Promise<string>(resolve => {
 			west(['topdir'], (err, out) => {
@@ -284,27 +322,42 @@ async function checkIsZephyr(): Promise<boolean> {
 	return !!(board?.board && board.arch && board.dir);
 }
 
-export async function activate(context: vscode.ExtensionContext) {
-	var hrTime = process.hrtime();
-	isZephyr = await checkIsZephyr();
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
+	let run = async () => {
+
+		var hrTime = process.hrtime();
+		isZephyr = await checkIsZephyr();
+		if (isZephyr) {
+			activateZephyr(context);
+
+			hrTime = process.hrtime(hrTime);
+
+			var time_ms = Math.round(hrTime[0] * 1000 + hrTime[1] / 1000000);
+			console.log(`Zephyr activation: ${time_ms} ms`);
+		}
+
+		return isZephyr;
+	};
+
+	await run();
 	if (isZephyr) {
-		activateZephyr(context);
-
-		hrTime = process.hrtime(hrTime);
-
-		var time_ms = Math.round(hrTime[0] * 1000 + hrTime[1] / 1000000);
-		console.log(`Zephyr activation: ${time_ms} ms`);
+		return Promise.resolve();
 	}
 
-	context.subscriptions.push(vscode.commands.registerCommand('kconfig.zephyr.setBoard', () => {
-		if (isZephyr) {
-			selectBoard();
-		} else if (vscode.workspace.workspaceFolders) {
-			vscode.window.showWarningMessage('Not in a Zephyr workspace.');
-		} else {
-			vscode.window.showWarningMessage('Zephyr must be opened as a folder or workspace.');
-		}
-	}));
+	return new Promise(resolve => {
+		let disposable = vscode.workspace.onDidChangeConfiguration(e => {
+			if (!isZephyr && e.affectsConfiguration('kconfig.zephyr')) {
+				kEnv.update();
+				run().then(worked => {
+					if (worked && zephyrRoot) {
+						vscode.window.showInformationMessage(`Found Zephyr in ${zephyrRoot}`);
+						resolve();
+					}
+				});
+			}
+		});
+		context.subscriptions.push(disposable);
+	});
 }
 
 var manifestWatcher: vscode.FileSystemWatcher;

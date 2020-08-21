@@ -169,7 +169,7 @@ export class ParsedFile {
 		};
 
 		const configMatch    = /^\s*(menuconfig|config)\s+(\w+)/;
-		const sourceMatch    = /^\s*(source|rsource|osource)\s+"((?:.*?[^\\])?)"/;
+		const sourceMatch    = /^(\s*(o)?(r)?source\s+)"((?:.*?[^\\])?)"/;
 		const choiceMatch    = /^\s*choice(?:\s+(\w+))?/;
 		const endChoiceMatch = /^\s*endchoice\b/;
 		const ifMatch        = /^\s*if\s+([^#]+)/;
@@ -261,22 +261,24 @@ export class ParsedFile {
 			match = line.match(sourceMatch);
 			if (match) {
 				let baseDir: string;
-				if (match[1] === 'rsource') {
+				let optional = !!match[2];
+				let relative = !!match[3];
+				if (relative) {
 					baseDir = path.dirname(this.uri.fsPath);
 				} else {
 					baseDir = kEnv.getRoot();
 				}
-				var includeFile = kEnv.resolvePath(match[2], baseDir);
-				var range = new vscode.Range(
+				let includeFile = kEnv.resolvePath(match[4], baseDir);
+				let range = new vscode.Range(
 					new vscode.Position(lineNumber, match[1].length + 1),
 					new vscode.Position(lineNumber, match[0].length - 1));
 				if (includeFile.scheme === 'file') {
-					var matches = glob.sync(includeFile.fsPath);
+					let matches = glob.sync(includeFile.fsPath);
 					matches.forEach(match => {
 						this.inclusions.push({range: range, file: new ParsedFile(this.repo, vscode.Uri.file(match), env, scope, this)});
 					});
-					if (matches.length === 0) {
-						console.log(`Unable to resolve include ${match[2]} @ ${this.uri.fsPath}:L${lineNumber + 1}`);
+					if (matches.length === 0 && !optional) {
+						console.log(`Unable to resolve include ${match[4]} @ ${this.uri.fsPath}:L${lineNumber + 1}`);
 						this.diags.push(new vscode.Diagnostic(lineRange, 'Unable to resolve include'));
 					}
 				} else {

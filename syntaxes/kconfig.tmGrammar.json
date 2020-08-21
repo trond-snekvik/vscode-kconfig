@@ -88,7 +88,7 @@
             ]
         },
         {
-            "begin": "^\\s*(prompt|source|rsource|osource|mainmenu|menu|comment)\\s+",
+            "begin": "^\\s*(prompt|source|rsource|osource|orsource|mainmenu|menu|comment)\\s+",
             "end": "$",
             "beginCaptures": {"1": {"name": "keyword.control"}},
             "patterns": [

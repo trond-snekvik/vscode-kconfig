@@ -10,6 +10,7 @@ import * as yaml from 'yaml';
 import * as kEnv from './env';
 import * as glob from 'glob';
 import { Repository } from './kconfig';
+import { env } from 'process';
 
 const MODULE_FILE = vscode.Uri.parse('kconfig://zephyr/binary.dir/Kconfig.modules');
 const SOC_FILE = vscode.Uri.parse('kconfig://zephyr/binary.dir/Kconfig.soc');
@@ -24,7 +25,7 @@ function west(args: string[], callback?: (err: ExecException | null, stdout: str
 		if (process.platform === 'win32') {
 			exe = 'west';
 		} else {
-			exe = '/home/trond/.local/bin/west';
+			exe = env['HOME'] + '/.local/bin/west';
 		}
 	}
 	var command = exe + ' ' + args.join(' ');

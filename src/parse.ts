@@ -189,7 +189,7 @@ export class ParsedFile {
 		const visibleMatch   = /^\s*visible\s+if\s+([^#]+)/;
 		const defMatch       = /^\s*def_(bool|tristate|int|hex)\s+([^#]+)/;
 		const defStringMatch = /^\s*def_string\s+"((?:.*?[^\\])?)"(?:\s+if\s+([^#]+))?/;
-		const rangeMatch     = /^\s*range\s+([\-+]?\w+)\s+([\-+]?\w+)(?:\s+if\s+([^#]+))?/;
+		const rangeMatch     = /^\s*range\s+([\-+]?\w+|\$\(.*?\))\s+([\-+]?\w+|\$\(.*?\))(?:\s+if\s+([^#]+))?/;
 
 		var entry: ConfigEntry | null = null;
 		var comment: Comment | null = null;

@@ -695,7 +695,11 @@ export class Repository {
 		var hrTime = process.hrtime();
 
 		var files = this.files.filter(f => f.uri.fsPath === uri.fsPath);
+		if (!files.length) {
+			return;
+		}
 
+		this.cachedConfigList = undefined;
 		files.forEach(f => f.onDidChange(change));
 		hrTime = process.hrtime(hrTime);
 

@@ -360,37 +360,40 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	});
 }
 
-var manifestWatcher: vscode.FileSystemWatcher;
-
-export function setRepo(repo: Repository, context: vscode.ExtensionContext) {
-	west(['topdir'], (err, out) => {
+export function onWestChange(context: vscode.ExtensionContext, westChange: () => any) {
+	west(['topdir'], async (err, out) => {
 		if (!err) {
-			var conf = out.trim() + '/.west/config';
+			let conf = out.trim() + '/.west/config';
+
+			let confDoc = await vscode.workspace.openTextDocument(conf);
+			if (!confDoc) {
+				return;
+			}
 
 			var setupManifestWatcher = () => {
-				fs.readFile(conf, (e, data) => {
-					var lines = data.toString('utf-8').split(/\r?\n/);
-					var manifestIndex = lines.findIndex(l => l.includes('[manifest]'));
-					if (manifestIndex < 0 && manifestIndex >= lines.length - 1) {
-						return;
-					}
+				let lines = confDoc.getText().split(/\r?\n/);
+				var manifestIndex = lines.findIndex(l => l.includes('[manifest]'));
+				if (manifestIndex < 0 && manifestIndex >= lines.length - 1) {
+					return;
+				}
 
-					var pathLine = lines.slice(manifestIndex + 1).find(l => l.includes('path ='));
-					var westManifest = out.trim() + '/' + pathLine?.split('=')[1].trim() + '/west.yml';
-					if (manifestWatcher) {
-						manifestWatcher.dispose();
-					}
-					manifestWatcher = vscode.workspace.createFileSystemWatcher(westManifest, true, false, true);
-					context.subscriptions.push(manifestWatcher);
-					context.subscriptions.push(manifestWatcher.onDidChange(e => {
-						repo.onDidChange(MODULE_FILE);
+				var pathLine = lines.slice(manifestIndex + 1).find(l => l.includes('path ='));
+				var westManifest = out.trim() + '/' + pathLine?.split('=')[1].trim() + '/west.yml';
+
+				vscode.workspace.openTextDocument(westManifest).then(doc => {
+					context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(e => {
+						if (e.document.uri.toString() === doc.uri.toString()) {
+							westChange();
+						}
 					}));
-				});
+				}, _ => {});
 			};
 
-			context.subscriptions.push(vscode.workspace.createFileSystemWatcher(conf, true, false, true).onDidChange(e => {
-				repo.onDidChange(MODULE_FILE);
-				setupManifestWatcher();
+			context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(e => {
+				if (e.document.uri.toString() === confDoc.uri.toString()) {
+					westChange();
+					setupManifestWatcher();
+				}
 			}));
 
 			setupManifestWatcher();

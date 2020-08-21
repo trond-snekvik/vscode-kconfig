@@ -32,7 +32,7 @@ class KconfigLangHandler
 	conf: ConfigOverride[];
 	temporaryRoot: string | null;
 	rootChangeIgnore = new Array<string>();
-	propfileRefreshTimer?: NodeJS.Timeout;
+	rescanTimer?: NodeJS.Timeout;
 	constructor() {
 		const sortItems = (item: vscode.CompletionItem, i: number) => {
 			const pad = '0000';
@@ -136,13 +136,7 @@ class KconfigLangHandler
 		var watcher = vscode.workspace.createFileSystemWatcher('**/Kconfig*', true, false, true);
 		watcher.onDidChange(uri => {
 			if (!vscode.workspace.textDocuments.some(d => d.uri.fsPath === uri.fsPath)) {
-				this.repo.onDidChange(uri);
-
-				if (this.propfileRefreshTimer) {
-					clearTimeout(this.propfileRefreshTimer);
-				}
-
-				this.propfileRefreshTimer = setTimeout(() => this.refreshOpenPropfiles(), 1000);
+				this.delayedRescan();
 			}
 		});
 		context.subscriptions.push(watcher);
@@ -239,7 +233,19 @@ class KconfigLangHandler
 		return this.propFiles[uri.fsPath];
 	}
 
+	delayedRescan(delay=1000) {
+		// debounce:
+		if (this.rescanTimer) {
+			clearTimeout(this.rescanTimer);
+		}
+
+		this.rescanTimer = setTimeout(() => {
+			this.rescan();
+		}, delay);
+	}
+
 	rescan() {
+		console.log('Rescan');
 		this.propFiles = {};
 		this.diags.clear();
 		this.repo.reset();
@@ -254,7 +260,7 @@ class KconfigLangHandler
 	}
 
 	activate(context: vscode.ExtensionContext) {
-		zephyr.setRepo(this.repo, context);
+		zephyr.onWestChange(context, () => this.delayedRescan());
 		var root = kEnv.getRootFile();
 		if (!root) {
 			return;

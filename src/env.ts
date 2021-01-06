@@ -104,9 +104,16 @@ export function pathReplace(fileName: string): string {
 	fileName = fileName.replace(/\$[{(]?(\w+)[})]?/g, (original: string, v: string) => {
 		if (v in env) {
 			return env[v];
-		} else if (v in process.env) {
+		}
+
+		if (v.startsWith('env:')) {
+			v = v.slice('env:'.length);
+		}
+
+		if (v in process.env) {
 			return process.env[v] as string;
 		}
+
 		return '';
 	});
 

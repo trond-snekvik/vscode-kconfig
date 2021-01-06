@@ -282,7 +282,7 @@ async function checkIsZephyr(): Promise<boolean> {
 	}
 
 	let base = getZephyrBase() ??
-		await new Promise<string>(resolve => {
+		await new Promise<string | undefined>(resolve => {
 			west(['topdir'], (err, out) => {
 				if (err) {
 					resolve(undefined);

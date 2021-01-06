@@ -152,7 +152,7 @@ export class PropFile {
 	private skipTick() {
 		// Can't use await Promise.resolve(), for some reason.
 		// Probably some vscode runtime is changing the behavior of this...
-		return new Promise(resolve => setImmediate(() => resolve()));
+		return new Promise<void>(resolve => setImmediate(() => resolve()));
 	}
 
 	private getDependencyOverrides(missingDependency: string, ctx: EvalContext) {

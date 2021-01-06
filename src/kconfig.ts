@@ -54,7 +54,7 @@ export class Comment {
 
 export abstract class Scope {
 	lines: LineRange;
-	name: string;
+	private _name: string;
 	file: ParsedFile;
 	parent?: Scope;
 	children: (Scope | ConfigEntry | Comment)[];
@@ -62,7 +62,7 @@ export abstract class Scope {
 	symbolKind: vscode.SymbolKind;
 
 	constructor(type: string, name: string, repo: Repository, line: number, file: ParsedFile, symbolKind: vscode.SymbolKind, parent?: Scope) {
-		this.name = name;
+		this._name = name;
 		this.lines = {start: line, end: line};
 		this.file = file;
 		this.parent = parent;
@@ -75,6 +75,13 @@ export abstract class Scope {
 		} else if (!(this instanceof RootScope)) {
 			console.error(`Orphan scope: ${this.id} @ ${this.file.uri.fsPath}:${line}`);
 		}
+	}
+
+	public get name(): string {
+		return this._name;
+	}
+	public set name(value: string) {
+		this._name = value;
 	}
 
 	addScope(s: Scope): Scope {
@@ -157,6 +164,7 @@ export class ChoiceScope extends Scope {
 	get name(): string {
 		return this.choice.text || this.choice.config.name;
 	}
+
 	set name(name: string) {}
 
 	resolve(ctx: EvalContext) {

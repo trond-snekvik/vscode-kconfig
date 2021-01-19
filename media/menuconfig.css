@@ -1,0 +1,243 @@
+
+body {
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+	max-height: -webkit-fill-available;
+	min-height: -webkit-fill-available;
+	padding: 0px;
+	/* max-width: 800px; */
+	/* padding: 20px; */
+	/* align-items: center; */
+}
+
+.contents {
+	max-width: 800px;
+}
+
+.row, .comment-row {
+	padding: 10px;
+	max-width: 800px;
+	display: flex;
+	box-sizing: border-box;
+}
+
+.row:hover {
+	background-color: var(--vscode-notebook-rowHoverBackground);
+}
+
+.row:focus {
+	outline: none;
+	border: solid var(--vscode-notebook-focusedRowBorder);
+	border-width: 1px 0px;
+	background-color: var(--vscode-settings-focusedRowBackground);
+	padding: 9px 10px;
+}
+
+.menu-row {
+	padding: 5px 10px;
+}
+
+.menu-row:focus {
+	padding: 4px 10px;
+}
+
+.comment {
+	font-weight: bold;
+	font-size: 26px;
+	color: var(--vscode-foreground);
+}
+
+.menuconfig {
+	overflow-y: scroll;
+	flex-grow: 1;
+	align-items: center;
+}
+
+#menuconfig-content {
+	max-width: 800px;
+	margin: auto;
+}
+
+#help {
+	position: fixed;
+	margin: 10px;
+	min-height: 200px;
+	min-width: 200px;
+	max-height: 200px;
+	max-width: 600px;
+	border: solid var(--vscode-settings-textInputForeground);
+	border-width: 1px;
+	flex-shrink: 0;
+	padding: 10px;
+	background: var(--vscode-activityBar-background);
+}
+
+.help {
+	display:block;
+}
+
+.hidden {
+	display: none;
+}
+
+.row-content {
+	padding-left: 12px;
+	flex-grow: 1;
+	margin: auto;
+}
+
+.row-content.changed {
+	padding-left: 10px;
+	border-left: solid 2px var(--vscode-settings-modifiedItemIndicator);
+}
+
+
+.checkmark {
+	display: block;
+	width: 16px;
+	height: 16px;
+	margin-right: 20px;
+	background-color: var(--vscode-checkbox-background);
+	color: var(--vscode-checkbox-foreground);
+	border: solid var(--vscode-checkbox-border);
+	border-width: 1px;
+	border-radius: 3px;
+	flex-shrink: 0;
+}
+
+.checkmark > * {
+	display: none !important;
+}
+
+input[type="checkbox"]:checked ~ .checkmark > * {
+	display: block !important;
+}
+
+input[type="checkbox"]:focus ~ .checkmark > * {
+	outline: 1px solid var(--vscode-notebook-focusedEditorBorder);
+	outline-offset: -1px;
+}
+
+label {
+	user-select: none;
+	display: flex;
+	cursor: pointer;
+	width: -webkit-fill-available;
+}
+
+div[name="title"] {
+	flex-grow: 1;
+}
+
+.entry-title {
+	font-weight: bold;
+	padding-bottom: 10px;
+	color: var(--vscode-foreground);
+}
+
+.menu-title {
+	font-weight: bold;
+	margin: auto;
+	color: var(--vscode-foreground);
+}
+
+input {
+	padding: 5px;
+	margin: 10px 0px;
+	font-size: var(--vscode-font-size);
+	font-family: var(--vscode-font-family);
+	color: var(--vscode-settings-textInputForeground);
+	background: var(--vscode-settings-textInputBackground);
+	border: 1px solid var(--vscode-settings-textInputBorder);
+}
+
+a:focus,
+input:focus,
+select:focus,
+textarea:focus {
+	outline: 1px solid var(--vscode-notebook-focusedEditorBorder);
+	outline-offset: -1px;
+}
+
+#search {
+	padding-bottom: 15px;
+	border-bottom: var(--vscode-editorRuler-foreground);
+	max-width: 800px;
+	width: 800px;
+	align-self: center;
+}
+
+#search-box {
+	background-color: var(--vscode-input-background);
+	color: var(--vscode-input-foreground);
+	border: solid var(--vscode-input-border);
+	border-width: 1px;
+	display: flex;
+	height: 30px;
+}
+
+#search-box:has(#search-input:focus) {
+	background-color: red;
+}
+
+#search-box .codicon {
+	margin: auto;
+	padding-left: 5px;
+	font-size: 16px;
+	text-align: center;
+}
+
+#search-input {
+	display: block;
+	width: -webkit-fill-available;
+	height: -webkit-fill-available;
+	margin: 0px;
+	/* font: initial; */
+}
+
+#search-input:focus {
+	outline: none;
+}
+
+.button {
+	margin: auto;
+	flex-grow: 0;
+	opacity: 50%;
+	cursor: pointer;
+}
+
+.button.disabled {
+	opacity: 15% !important;
+	cursor: initial;
+}
+
+.button:hover {
+	opacity: 100%;
+}
+
+.button > .codicon {
+	font-size: 32px !important;
+}
+
+#up {
+	margin: auto;
+}
+
+#up > i {
+	font-size: 32px !important;
+	padding-right: 15px;
+}
+#menu-title {
+	font-size: 32px;
+	flex-grow: 1;
+}
+#title {
+	border: solid var(--vscode-notebook-focusedRowBorder);
+	border-width: 0px 0px 1px 0px;
+	/* margin: 10px 0px; */
+	width: 800px;
+	align-self: center;
+	display: flex;
+	padding-bottom: 20px;
+}

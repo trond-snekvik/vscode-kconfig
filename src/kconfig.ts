@@ -622,7 +622,7 @@ export class ChoiceEntry extends ConfigEntry {
 	}
 }
 
-export type EntryTreeItem = { entry: ConfigEntry | Scope | Comment, children: EntryTreeItem[] };
+export type EntryTreeItem = { entry: ConfigEntry | Scope | Comment, children: EntryTreeItem[], parent?: ConfigEntry | Scope | Comment };
 
 export class Repository {
 	configs: {[name: string]: Config};
@@ -795,6 +795,8 @@ export class Repository {
 
 					return [...prev, curr];
 				}, new Array<EntryTreeItem>());
+
+			symbol.children.forEach(c => c.parent = symbol.entry);
 
 			return symbol;
 		};

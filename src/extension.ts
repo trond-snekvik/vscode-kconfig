@@ -224,6 +224,11 @@ class KconfigLangHandler
 		disposable = vscode.languages.registerReferenceProvider(kconfig, this);
 		context.subscriptions.push(disposable);
 
+		this.repo.activate(context);
+
+		const menu = new Menuconfig(new EvalContext(this.repo, []), context);
+		vscode.window.registerCustomEditorProvider('kconfig.menuconfig', menu);
+
 		vscode.commands.registerCommand('kconfig.menuconfig', (uri?: vscode.Uri) => {
 			if (!uri) {
 				if (!vscode.window.activeTextEditor) {
@@ -239,11 +244,9 @@ class KconfigLangHandler
 				return;
 			}
 
-			this.menuconfig = new Menuconfig(new EvalContext(this.repo, file.overrides));
+			this.menuconfig = new Menuconfig(new EvalContext(this.repo, file.overrides), context);
 			this.menuconfig.render();
 		});
-
-		this.repo.activate(context);
 	}
 
 	propFile(uri: vscode.Uri): PropFile {

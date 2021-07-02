@@ -1,0 +1,34 @@
+trigger:
+  - master
+
+pool:
+  vmImage: ubuntu-20.04
+
+name: $(Year:yyyy).$(Month).$(Rev:r)
+
+steps:
+- task: NodeTool@0
+  inputs:
+    versionSpec: 14
+  displayName: Install Node.js
+- script: |
+    set -o errexit -o pipefail
+    npm ci
+  displayName: Install dependencies
+- script: |
+    set -o errexit -o pipefail
+    echo "npm run lint" is skipped for now
+  displayName: Run linter
+- bash: |
+    set -o errexit -o pipefail
+    npm install -g vsce
+    npm run updateBuildNumber $(Build.BuildNumber)
+    vsce package
+    pkg=$(ls *.vsix)
+    mv -v ${pkg} "$(Build.ArtifactStagingDirectory)/${pkg}"
+  displayName: Pack and build extension
+- task: PublishPipelineArtifact@1
+  inputs:
+    targetPath: $(Build.ArtifactStagingDirectory)
+  displayName: Publish artifact
+

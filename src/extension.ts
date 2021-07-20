@@ -12,8 +12,9 @@ import * as zephyr from './zephyr';
 import { PropFile } from './propfile';
 import * as fs from 'fs';
 import * as path from 'path';
+import Api from './api';
 
-class KconfigLangHandler
+export class KconfigLangHandler
 	implements
 		vscode.DefinitionProvider,
 		vscode.HoverProvider,
@@ -181,7 +182,6 @@ class KconfigLangHandler
 					file = this.propFile(d.uri);
 					file.onOpen(d);
 				}
-
 				this.suggestKconfigRoot(file);
 			} else {
 				this.setKconfigLang(d);
@@ -195,7 +195,7 @@ class KconfigLangHandler
 				if (e.affectsConfiguration('kconfig.root')) {
 					this.repo.setRoot(kEnv.getRootFile());
 				}
-				this.rescan();
+				this.delayedRescan()
 			}
 		});
 		context.subscriptions.push(disposable);
@@ -272,7 +272,6 @@ class KconfigLangHandler
 		this.registerHandlers(context);
 		this.repo.setRoot(root);
 		this.doScan();
-
 		if (vscode.window.activeTextEditor?.document.languageId === 'properties') {
 			this.suggestKconfigRoot(this.propFile(vscode.window.activeTextEditor.document.uri));
 		}
@@ -622,6 +621,8 @@ class KconfigLangHandler
 var langHandler: KconfigLangHandler;
 
 export function activate(context: vscode.ExtensionContext) {
+	const api = new Api();
+
 	if (kEnv.getConfig('disable')) {
 		return;
 	}
@@ -641,6 +642,8 @@ export function activate(context: vscode.ExtensionContext) {
 
 		langHandler.activate(context);
 	});
+
+	return api;
 }
 
 export function deactivate() {

@@ -14,8 +14,8 @@ export function getConfig(name: string): any {
 	return config.get(name);
 }
 
-export function setConfig(name: string, value: any, target=vscode.ConfigurationTarget.Workspace) {
-	config.update(name, value, target);
+export async function setConfig(name: string, value: any, target=vscode.ConfigurationTarget.Workspace) {
+	await config.update(name, value, target);
 }
 
 export function getRootFile(): vscode.Uri {
@@ -38,6 +38,16 @@ export function getRoot() {
 	}
 
 	return path.dirname(getRootFile().fsPath);
+}
+
+export function findRootFromApp(appUri: vscode.Uri) {
+	const appKconfig = path.join(appUri.fsPath, 'Kconfig');
+
+	if (fs.existsSync(appKconfig)) {
+		return appKconfig;
+	} else {
+		return path.join(getConfig('zephyr.base'), 'Kconfig');
+	}
 }
 
 export function isActive(): boolean {

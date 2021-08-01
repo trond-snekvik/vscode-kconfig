@@ -55,27 +55,6 @@
 							}
 						}
 					},
-					"kconfig.conf": {
-						"type": "object",
-						"description": "Static configuration items entries as an object.",
-						"patternProperties": {
-							"^CONFIG_\\w[\\w_\\d]*": {
-								"type": [
-									"string",
-									"integer",
-									"boolean"
-								]
-							}
-						},
-						"additionalProperties": false
-					},
-					"kconfig.conf_files": {
-						"type": "array",
-						"description": "Array of properties files to always parse before the open properties file.",
-						"items": {
-							"type": "string"
-						}
-					},
 					"kconfig.cfiles": {
 						"type": "boolean",
 						"description": "Enable Kconfig hover information and go to definition in C files",
@@ -160,7 +139,7 @@
 		"watch": "tsc -watch -p ./",
 		"test": "npm run compile && node ./node_modules/vscode/bin/test",
 		"webpack": "webpack --mode development",
-		"webpack-dev": "webpack --mode development --watch",
+		"webpack-dev": "npx webpack --mode development --watch",
 		"test-compile": "tsc -p ./",
 		"lint": "node ./scripts/lint.js",
 		"lintfix": "node ./scripts/lint.js --fix",
@@ -174,11 +153,11 @@
 		"@types/vscode": "^1.37.0",
 		"@types/yaml": "^1.2.0",
 		"prettier": "^2.3.2",
-		"ts-loader": "^8.0.0",
+		"ts-loader": "^9.2.4",
 		"tslint": "^5.12.1",
-		"typescript": "^3.7.3",
-		"webpack": "^4.43.0",
-		"webpack-cli": "^3.3.12"
+		"typescript": "^4.3.5",
+		"webpack": "^5.47.1",
+		"webpack-cli": "^4.7.2"
 	},
 	"dependencies": {
 		"fuzzysort": "^1.1.4",

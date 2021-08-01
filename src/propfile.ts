@@ -6,32 +6,27 @@
 import * as vscode from 'vscode';
 import { ConfigOverride, Repository, EvalContext } from "./kconfig";
 import { Token, makeExpr, tokenizeExpression, TokenKind } from './evaluate';
+import { Context } from './context';
 
 export class PropFile {
 	actions: vscode.CodeAction[] = [];
 	conf: ConfigOverride[] = [];
-	baseConf: ConfigOverride[];
-	repo: Repository;
-	uri: vscode.Uri;
-	private diags: vscode.DiagnosticCollection;
 	private timeout?: NodeJS.Timeout;
 	private parseDiags: vscode.Diagnostic[] = [];
 	private lintDiags: vscode.Diagnostic[] = [];
-	private version: number;
+	private version = 0;
 
-	constructor(uri: vscode.Uri, repo: Repository, baseConf: ConfigOverride[], diags: vscode.DiagnosticCollection) {
-		this.uri = uri;
-		this.repo = repo;
-		this.baseConf = baseConf;
-		this.diags = diags;
-		this.version = 0;
-	}
+	constructor(public uri: vscode.Uri, private ctx: Context, private diags: vscode.DiagnosticCollection) {}
 
 	get overrides(): ConfigOverride[] {
-		return this.conf.concat(this.baseConf);
+		return this.conf;
 	}
 
-	parseLine(line: string, lineNumber: number): ConfigOverride | undefined {
+	get repo(): Repository {
+		return this.ctx.repo;
+	}
+
+	private parseLine(line: string, lineNumber: number): ConfigOverride | undefined {
 		var thisLine = new vscode.Position(lineNumber, 0);
 		var match = line.match(/^\s*CONFIG_([^\s=]+)\s*(.*)/);
 		if (!match) {
@@ -130,22 +125,18 @@ export class PropFile {
 		this.diags.set(this.uri, [...this.parseDiags, ...this.lintDiags]);
 	}
 
-	parse(text: string) {
+	async parse() {
+		const doc = await vscode.workspace.openTextDocument(this.uri);
+		const text = doc.getText();
+
 		this.parseDiags = [];
 		this.conf = [];
 		this.version++;
-		console.log("Parsing...");
 
 		var lines = text.split(/\r?\n/g);
 
 		this.conf = lines.map((l, i) => this.parseLine(l, i)).filter(c => c !== undefined) as ConfigOverride[];
 		this.updateDiags();
-		console.log("Parsing done.");
-	}
-
-	reparse(d: vscode.TextDocument) {
-		this.parse(d.getText());
-		this.scheduleLint();
 	}
 
 	// Utility for desynchronizing context in lint
@@ -213,10 +204,9 @@ export class PropFile {
 			clearTimeout(this.timeout);
 		}
 
-		console.log("lint starting");
 		await this.skipTick();
 
-		var ctx = new EvalContext(this.repo, this.overrides);
+		var ctx = new EvalContext(this.repo, this.ctx.overrides);
 
 		var diags = <vscode.Diagnostic[]>[];
 
@@ -383,7 +373,6 @@ export class PropFile {
 			}
 		}
 
-		console.log("Lint done.");
 		this.lintDiags = diags;
 		this.actions = actions;
 		this.updateDiags();
@@ -418,15 +407,7 @@ export class PropFile {
 				diag.range.end.character
 			);
 		});
-		this.parse(e.document.getText());
+		this.parse();
 		this.scheduleLint();
-	}
-
-	onSave(d: vscode.TextDocument) {
-		this.lint();
-	}
-
-	onOpen(d: vscode.TextDocument) {
-		this.reparse(d);
 	}
 }

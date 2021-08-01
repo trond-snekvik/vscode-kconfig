@@ -6,13 +6,21 @@
 import * as vscode from 'vscode';
 import * as fuzzy from "fuzzysort";
 import { Operator } from './evaluate';
-import { Config, ConfigOverride, ConfigEntry, Repository, IfScope, Scope, Comment } from "./kconfig";
+import { Config, ConfigEntry, Repository, IfScope, Scope, Comment } from "./kconfig";
 import * as kEnv from './env';
 import * as zephyr from './zephyr';
-import { PropFile } from './propfile';
 import * as fs from 'fs';
 import * as path from 'path';
 import Api from './api';
+import { Context } from './context';
+
+function isConfFile(doc?: vscode.TextDocument): boolean {
+	// Files like .gitconfig is also a properties file. Check extensions in addition:
+	return (
+		doc?.languageId === "properties" &&
+		(doc.fileName.endsWith(".conf") || doc.fileName.endsWith("_defconfig"))
+	);
+}
 
 export class KconfigLangHandler
 	implements
@@ -26,13 +34,11 @@ export class KconfigLangHandler
 		vscode.WorkspaceSymbolProvider {
 	diags: vscode.DiagnosticCollection;
 	fileDiags: {[uri: string]: vscode.Diagnostic[]};
-	propFiles: { [uri: string]: PropFile };
 	rootCompletions: vscode.CompletionItem[];
 	propertyCompletions: vscode.CompletionItem[];
 	repo: Repository;
-	conf: ConfigOverride[];
-	temporaryRoot: string | null;
-	rootChangeIgnore = new Array<string>();
+	context?: Context;
+	configured = false;
 	rescanTimer?: NodeJS.Timeout;
 	constructor() {
 		const sortItems = (item: vscode.CompletionItem, i: number) => {
@@ -87,36 +93,61 @@ export class KconfigLangHandler
 		this.propertyCompletions = this.propertyCompletions.map(sortItems);
 
 		this.fileDiags = {};
-		this.propFiles = {};
-		this.temporaryRoot = null;
 		this.diags = vscode.languages.createDiagnosticCollection('kconfig');
 		this.repo = new Repository(this.diags);
-		this.conf = [];
 	}
 
-	private setKconfigLang(d: vscode.TextDocument) {
-		if ((!d.languageId || d.languageId === 'plaintext') && path.basename(d.fileName).startsWith('Kconfig.')) {
-			vscode.languages.setTextDocumentLanguage(d, 'kconfig');
+	private setFileType(d: vscode.TextDocument) {
+		/* It's not possible to pick up all kconfig filename types with the
+		 * static schema contribution point, as it would pick up stuff like
+		 * kconfig.py or kconfig.cmake, which shouldn't be treated as kconfig
+		 * files at all. Set the kconfig language through a fallback for files
+		 * that have no other file type set instead:
+		 */
+		if (!d.languageId || d.languageId === 'plaintext') {
+			if (path.basename(d.fileName).startsWith("Kconfig.")) {
+				vscode.languages.setTextDocumentLanguage(d, "kconfig");
+			} else if (path.basename(d.fileName).endsWith("_defconfig")) {
+				vscode.languages.setTextDocumentLanguage(d, "properties");
+			}
 		}
 	}
 
-	private suggestKconfigRoot(propFile: PropFile) {
-		// hint at Kconfig root file
-		let kconfigRoot = path.resolve(path.dirname(propFile.uri.fsPath), 'Kconfig');
-		if (!this.rootChangeIgnore.includes(kconfigRoot) && kconfigRoot !== this.repo.root?.uri.fsPath && fs.existsSync(kconfigRoot)) {
-			vscode.window.showInformationMessage(`A Kconfig file exists in this directory.\nChange the Kconfig root file?`, 'Temporarily', 'Permanently', 'Never').then(t => {
-				if (t === 'Temporarily') {
-					this.repo.setRoot(vscode.Uri.file(kconfigRoot));
-					this.rescan();
-					this.temporaryRoot = propFile.uri.fsPath;
-				} else if (t === 'Permanently') {
-					this.repo.setRoot(vscode.Uri.file(kconfigRoot));
-					kEnv.setConfig('root', kconfigRoot);
-				} else if (t === 'Never') {
-					this.rootChangeIgnore.push(kconfigRoot);
-				}
-			});
+	async onOpenConfFile(uri: vscode.Uri) {
+		const existing = this.context?.getFile(uri);
+		if (existing) {
+			existing.lint();
+			return;
 		}
+
+		if (this.configured || !zephyr.zephyrRoot) {
+			/* Don't abandon the current context if it has been set by the API */
+			return;
+		}
+
+		const confFiles = new Array<vscode.Uri>();
+
+		const boardFile = zephyr.boardConfFile();
+		if (boardFile) {
+			confFiles.push(boardFile);
+		}
+
+		confFiles.push(uri);
+
+		this.context = new Context(confFiles, this.repo, this.diags);
+
+		let kconfigRoot = vscode.Uri.joinPath(vscode.Uri.file(path.dirname(uri.fsPath)), 'Kconfig');
+		if (!fs.existsSync(kconfigRoot.fsPath)) {
+			kconfigRoot = vscode.Uri.joinPath(vscode.Uri.file(zephyr.zephyrRoot), 'Kconfig');
+		}
+
+		if (this.repo.root?.uri.fsPath !== kconfigRoot.fsPath) {
+			this.repo.setRoot(kconfigRoot);
+			this.rescan();
+		}
+
+		await this.context.reparse();
+		return this.context.getFile(uri)!.lint();
 	}
 
 	registerHandlers(context: vscode.ExtensionContext) {
@@ -125,9 +156,8 @@ export class KconfigLangHandler
 		disposable = vscode.workspace.onDidChangeTextDocument(async e => {
 			if (e.document.languageId === 'kconfig') {
 				this.repo.onDidChange(e.document.uri, e);
-			} else if (e.document.languageId === 'properties' && e.contentChanges.length > 0) {
-				var file = this.propFile(e.document.uri);
-				file.onChange(e);
+			} else if (isConfFile(e.document) && e.contentChanges.length > 0) {
+				this.context?.onChange(e);
 			}
 		});
 		context.subscriptions.push(disposable);
@@ -143,49 +173,19 @@ export class KconfigLangHandler
 		context.subscriptions.push(watcher);
 
 		disposable = vscode.window.onDidChangeActiveTextEditor(e => {
-			if (e?.document.languageId === 'properties') {
-				var file;
-				if (this.temporaryRoot && this.temporaryRoot !== e.document.uri.fsPath) {
-					this.temporaryRoot = null;
-					this.repo.setRoot(kEnv.getRootFile());
-					this.rescan();
-					file = this.propFile(e.document.uri);
-				} else {
-					file = this.propFile(e.document.uri);
-					file.reparse(e.document);
-				}
-
-				this.suggestKconfigRoot(file);
-			} else if (e?.document) {
-				this.setKconfigLang(e.document);
+			if (e && isConfFile(e.document)) {
+				return this.onOpenConfFile(e.document.uri);
 			}
 		});
 		context.subscriptions.push(disposable);
 
 		disposable = vscode.workspace.onDidSaveTextDocument(d => {
-			if (d.languageId === 'properties') {
-				var file = this.propFile(d.uri);
-				file.onSave(d);
-			}
+			this.context?.getFile(d.uri)?.lint();
 		});
 		context.subscriptions.push(disposable);
 
 		disposable = vscode.workspace.onDidOpenTextDocument(d => {
-			if (d.languageId === 'properties') {
-				var file;
-				if (this.temporaryRoot && this.temporaryRoot !== d.uri.fsPath) {
-					this.temporaryRoot = null;
-					this.repo.setRoot(kEnv.getRootFile());
-					this.rescan();
-					file = this.propFile(d.uri);
-				} else {
-					file = this.propFile(d.uri);
-					file.onOpen(d);
-				}
-				this.suggestKconfigRoot(file);
-			} else {
-				this.setKconfigLang(d);
-			}
+			this.setFileType(d);
 		});
 		context.subscriptions.push(disposable);
 
@@ -225,14 +225,6 @@ export class KconfigLangHandler
 		this.repo.activate(context);
 	}
 
-	propFile(uri: vscode.Uri): PropFile {
-		if (!(uri.fsPath in this.propFiles)) {
-			this.propFiles[uri.fsPath] = new PropFile(uri, this.repo, this.conf, this.diags);
-		}
-
-		return this.propFiles[uri.fsPath];
-	}
-
 	delayedRescan(delay=1000) {
 		// debounce:
 		if (this.rescanTimer) {
@@ -245,40 +237,67 @@ export class KconfigLangHandler
 	}
 
 	rescan() {
-		console.log('Rescan');
-		this.propFiles = {};
 		this.diags.clear();
 		this.repo.reset();
 
 		return this.doScan();
 	}
 
-	refreshOpenPropfiles() {
-		vscode.window.visibleTextEditors
-			.filter(e => e.document.languageId === 'properties')
-			.forEach(e => this.propFile(e.document.uri).reparse(e.document));
+	scanConfFiles() {
+		// Parse all open conf files, then lint the open editors:
+		this.context?.reparse().then(() => {
+			this.context!.confFiles
+				.filter(file => vscode.window.visibleTextEditors.find(e => file.uri.fsPath === e.document?.uri.fsPath))
+				.forEach(file => file.scheduleLint());
+		});
 	}
 
 	activate(context: vscode.ExtensionContext) {
 		zephyr.onWestChange(context, () => this.delayedRescan());
-		var root = kEnv.getRootFile();
-		if (!root) {
+
+		vscode.workspace.textDocuments.forEach(d => {
+			this.setFileType(d);
+		});
+		this.registerHandlers(context);
+	}
+
+	configure(board: zephyr.BoardTuple, confFiles: vscode.Uri[] = [], root?: vscode.Uri) {
+		if (!zephyr.zephyrRoot) {
 			return;
 		}
 
-		vscode.workspace.textDocuments.forEach(d => {
-			this.setKconfigLang(d);
-		});
-		this.registerHandlers(context);
-		this.repo.setRoot(root);
-		this.doScan();
-		if (vscode.window.activeTextEditor?.document.languageId === 'properties') {
-			this.suggestKconfigRoot(this.propFile(vscode.window.activeTextEditor.document.uri));
+		root ??= vscode.Uri.joinPath(vscode.Uri.file(zephyr.zephyrRoot), 'Kconfig');
+
+		const changedContext =
+			!this.configured ||
+			board.board !== zephyr.board?.board ||
+			confFiles.length !== this.context?.confFiles.length ||
+			!confFiles.some((uri) =>
+				this.context?.confFiles.find((p) => p.uri.fsPath === uri.fsPath)
+			);
+		const changedRepo =
+			!this.configured ||
+			this.repo.root?.uri.fsPath !== root.fsPath ||
+			board.board !== zephyr.board?.board;
+
+		if (changedRepo) {
+			zephyr.setBoard(board);
+			this.repo.setRoot(root);
+			this.rescan();
 		}
+
+		if (changedContext) {
+			this.context = new Context([zephyr.boardConfFile()!, ...confFiles], this.repo, this.diags);
+		}
+
+		if (changedRepo || changedContext) {
+			this.scanConfFiles();
+		}
+
+		this.configured = true;
 	}
 
 	deactivate() {
-		this.propFiles = {};
 		this.diags.clear();
 		this.repo.reset();
 	}
@@ -290,59 +309,8 @@ export class KconfigLangHandler
 
 		hrTime = process.hrtime(hrTime);
 
-		this.conf = this.loadConfOptions();
-
-		this.refreshOpenPropfiles();
-
 		var time_ms = Math.round(hrTime[0] * 1000 + hrTime[1] / 1000000);
 		vscode.window.setStatusBarMessage(`Kconfig: ${Object.keys(this.repo.configs).length} entries, ${time_ms} ms`, 5000);
-	}
-
-	loadConfOptions(): ConfigOverride[] {
-		var conf: { [config: string]: string | boolean | number } = kEnv.getConfig('conf');
-		var entries: ConfigOverride[] = [];
-		Object.keys(conf).forEach(c => {
-			var e = this.repo.configs[c];
-			if (e) {
-				var value;
-				if (value === true) {
-					value = 'y';
-				} else if (value === false) {
-					value = 'n';
-				} else {
-					value = conf[c].toString();
-				}
-				entries.push({ config: e, value: value });
-			}
-		});
-
-		var conf_files: string[] = kEnv.getConfig('conf_files');
-		if (!conf_files?.length) {
-			conf_files = zephyr.getConfig('conf_files') as string[];
-		}
-
-		if (conf_files) {
-			conf_files.forEach(f => {
-				try {
-					var text = kEnv.readFile(vscode.Uri.file(kEnv.pathReplace(f)));
-				} catch (e) {
-					if (e instanceof Error) {
-						if ('code' in e && e['code'] === 'ENOENT') {
-							vscode.window.showWarningMessage(`File "${f}" not found`);
-						} else {
-							vscode.window.showWarningMessage(`Error while reading conf file ${f}: ${e.message}`);
-						}
-					}
-					return;
-				}
-
-				var file = new PropFile(vscode.Uri.file(f), this.repo, [], this.diags);
-				file.parse(text);
-				entries.push(...file.conf);
-			});
-		}
-
-		return entries;
 	}
 
 	getSymbolName(document: vscode.TextDocument, position: vscode.Position) {
@@ -534,17 +502,14 @@ export class KconfigLangHandler
 		range: vscode.Range | vscode.Selection,
 		context: vscode.CodeActionContext,
 		token: vscode.CancellationToken): vscode.ProviderResult<vscode.CodeAction[]> {
-		if (document.uri.fsPath in this.propFiles) {
-			return this.propFiles[document.uri.fsPath].actions
-				.filter(a => (!context.only || context.only === a.kind) && a.diagnostics?.[0].range.intersection(range));
-		}
+		return this.context?.getFile(document.uri)
+			?.actions
+			.filter(a => (!context.only || context.only === a.kind) && a.diagnostics?.[0].range.intersection(range));
 	}
 
 	provideDocumentSymbols(document: vscode.TextDocument, token: vscode.CancellationToken): vscode.ProviderResult<vscode.DocumentSymbol[]> {
 		if (document.languageId === 'properties') {
-			return this.propFile(document.uri)
-				.overrides.filter(o => o.line !== undefined)
-				.map(
+			return this.context?.getFile(document.uri)?.overrides.map(
 					o =>
 						new vscode.DocumentSymbol(
 							o.config.name,
@@ -618,30 +583,49 @@ export class KconfigLangHandler
 
 }
 
-var langHandler: KconfigLangHandler;
+export var langHandler: KconfigLangHandler | undefined;
+var active = false;
+
+export function startExtension(): boolean {
+	if (active) {
+		return true;
+	}
+
+	kEnv.update();
+
+	if (!kEnv.isActive()) {
+		return false;
+	}
+
+	zephyr.activate(kEnv.extensionContext);
+
+	langHandler = new KconfigLangHandler();
+	langHandler.activate(kEnv.extensionContext);
+	active = true;
+	return true;
+}
 
 export function activate(context: vscode.ExtensionContext) {
 	const api = new Api();
 
+	kEnv.setExtensionContext(context);
 	if (kEnv.getConfig('disable')) {
 		return;
 	}
 
-	zephyr.activate(context).then(foundZephyr => {
-		if (!foundZephyr) {
-			return;
-		}
+	// If the nrf-connect extension exists, we'll wait for that to start the extension for us:
+    if (true || !vscode.extensions.getExtension("nordic-semiconductor.nrf-connect")) {
+		zephyr.resolveEnvironment(kEnv.extensionContext).then((foundZephyr) => {
+			if (!foundZephyr) {
+				return;
+			}
 
-		kEnv.update();
-
-		if (!kEnv.isActive()) {
-			return;
-		}
-
-		langHandler = new KconfigLangHandler();
-
-		langHandler.activate(context);
-	});
+			startExtension();
+			if (isConfFile(vscode.window.activeTextEditor?.document)) {
+				langHandler!.onOpenConfFile(vscode.window.activeTextEditor!.document.uri);
+			}
+		});
+	}
 
 	return api;
 }

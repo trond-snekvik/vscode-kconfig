@@ -5,41 +5,34 @@
  */
 import * as vscode from 'vscode';
 import * as zephyr from './zephyr';
-import * as kEnv from './env';
-
-interface Context {
-    config: Config;
-}
+import { langHandler, startExtension } from './extension';
 
 interface Config {
     appUri: vscode.Uri;
-    zephyrBoard?: string;
-    zephyrBase?: vscode.Uri;
-    west?: string;
+    board: {
+        /** Name of board, e.g. nrf52dk_nrf52832 */
+        id: string;
+        /** Uri to board directory, if available */
+        path?: vscode.Uri;
+    };
+    /** Configuration files used, in addition to the board's conf file */
+    confFiles?: vscode.Uri[],
+    /** Root Kconfig file, or leave undefined to fall back to $ZEPHYR_ROOT/Kconfig. */
+    kconfigRoot?: vscode.Uri;
 }
 
 class Api {
-    public version = 1;
+    public version = 2;
 
-    async addContext(config: Config): Promise<Context> {
-        return {
-            config,
-        }
+    async activate(zephyrBase: vscode.Uri, west: string, env?: typeof process.env): Promise<boolean> {
+        await zephyr.setWest(west, env);
+        await zephyr.setZephyrBase(zephyrBase);
+        return startExtension();
     }
 
-    async setContext(context: Context): Promise<void> {
-        const conf = context.config;
-        if (conf.zephyrBase){
-            await zephyr.setZephyrBase(conf.zephyrBase);
-        }
-        if (conf.west){
-            await zephyr.setWest(conf.west);
-        }
-        const root = kEnv.findRootFromApp(context.config.appUri);
-        kEnv.setConfig('root', root);
-        if (conf.zephyrBoard){
-            zephyr.updateBoardFromName(conf.zephyrBoard);
-        }
+    async setConfig(config: Config): Promise<void> {
+        const board = await zephyr.boardFromName(config.board.id, config.board.path);
+        langHandler?.configure(board, config.confFiles, config.kconfigRoot);
     }
 }
 

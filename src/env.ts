@@ -10,6 +10,11 @@ import * as zephyr from './zephyr';
 
 var config = vscode.workspace.getConfiguration('kconfig');
 
+export var extensionContext: vscode.ExtensionContext;
+export function setExtensionContext(ctx: vscode.ExtensionContext) {
+	extensionContext = ctx;
+}
+
 export function getConfig(name: string): any {
 	return config.get(name);
 }
@@ -21,7 +26,7 @@ export async function setConfig(name: string, value: any, target=vscode.Configur
 export function getRootFile(): vscode.Uri {
 	var root = getConfig('root');
 	if (!root) {
-		if (zephyr.isZephyr) {
+		if (zephyr.zephyrRoot) {
 			root = zephyr.zephyrRoot + '/Kconfig';
 		} else {
 			root = '${workspaceFolder}/Kconfig';
@@ -33,20 +38,16 @@ export function getRootFile(): vscode.Uri {
 
 /// Root directory of project
 export function getRoot() {
-	if (zephyr.isZephyr && zephyr.zephyrRoot) {
-		return zephyr.zephyrRoot!;
-	}
-
-	return path.dirname(getRootFile().fsPath);
+	return zephyr.zephyrRoot ?? path.dirname(getRootFile().fsPath);
 }
 
-export function findRootFromApp(appUri: vscode.Uri) {
+export function findRootFromApp(appUri: vscode.Uri): string | undefined {
 	const appKconfig = path.join(appUri.fsPath, 'Kconfig');
 
 	if (fs.existsSync(appKconfig)) {
 		return appKconfig;
-	} else {
-		return path.join(getConfig('zephyr.base'), 'Kconfig');
+	} else if (zephyr.zephyrRoot) {
+		return path.join(zephyr.zephyrRoot, 'Kconfig');
 	}
 }
 
@@ -63,9 +64,8 @@ var env: { [name: string]: string };
 
 export function update() {
 	config = vscode.workspace.getConfiguration('kconfig');
-	env = <{}>zephyr.getConfig('env') ?? {};
-	let userConf = getConfig('env');
-	Object.keys(userConf).forEach(k => env[k] = userConf[k]);
+	env = zephyr.getConfig();
+	Object.assign(env, getConfig('env'));
 
 	try {
 		Object.keys(env).forEach(key => {

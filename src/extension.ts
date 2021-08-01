@@ -614,13 +614,15 @@ export function activate(context: vscode.ExtensionContext) {
 	}
 
 	// If the nrf-connect extension exists, we'll wait for that to start the extension for us:
-    if (true || !vscode.extensions.getExtension("nordic-semiconductor.nrf-connect")) {
+    if (!vscode.extensions.getExtension("nordic-semiconductor.nrf-connect")) {
 		zephyr.resolveEnvironment(kEnv.extensionContext).then((foundZephyr) => {
 			if (!foundZephyr) {
 				return;
 			}
 
 			startExtension();
+			zephyr.createBoardStatusbarItem();
+
 			if (isConfFile(vscode.window.activeTextEditor?.document)) {
 				langHandler!.onOpenConfFile(vscode.window.activeTextEditor!.document.uri);
 			}

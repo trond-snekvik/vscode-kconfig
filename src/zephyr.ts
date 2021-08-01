@@ -234,7 +234,7 @@ class DocumentProvider implements vscode.TextDocumentContentProvider {
 	}
 }
 
-export function activate(context: vscode.ExtensionContext) {
+export function createBoardStatusbarItem() {
 	boardStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 2);
 	boardStatus.command = 'kconfig.zephyr.setBoard';
 	boardStatus.tooltip = 'Kconfig board';
@@ -252,8 +252,12 @@ export function activate(context: vscode.ExtensionContext) {
 	};
 
 	toggleBoardStatus(vscode.window.activeTextEditor);
-	context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(toggleBoardStatus));
+	kEnv.extensionContext.subscriptions.push(
+		vscode.window.onDidChangeActiveTextEditor(toggleBoardStatus)
+	);
+}
 
+export function activate(context: vscode.ExtensionContext) {
 	if (westEnv['ZEPHYR_SDK_INSTALL_DIR']) {
 		var toolchain_dir = `${zephyrRoot}/cmake/toolchain/zephyr`;
 		var toolchains = glob.sync('*.*/generic.cmake', {cwd: toolchain_dir}).map(g => g.replace(/\/.*/, ''));

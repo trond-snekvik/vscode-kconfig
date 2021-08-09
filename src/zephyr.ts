@@ -102,8 +102,8 @@ export function boardConfFile(): vscode.Uri | undefined {
 
 export function setBoard(b: BoardTuple) {
 	board = b;
-	kEnv.update();
 	kEnv.setConfig('zephyr.board', b);
+	kEnv.update();
 }
 
 function resolveBoard(board: string, arch: string): Promise<BoardTuple> {

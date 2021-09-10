@@ -1,18 +1,21 @@
 {
-	"name": "kconfig-lang",
+	"name": "nrf-kconfig",
 	"displayName": "Kconfig for the Zephyr Project",
 	"description": "Kconfig language support for the Zephyr Project",
-	"version": "1.1.8",
-	"publisher": "trond-snekvik",
+	"publisher": "nordic-semiconductor",
+	"author": {
+		"name": "Nordic Semiconductor",
+		"url": "https://www.nordicsemi.com/"
+	},
+	"version": "0.0.0",
+	"repository": {
+		"url": "https://github.com/NordicPlayground/vscode-nrf-kconfig",
+		"type": "git"
+	},
 	"engines": {
 		"vscode": "^1.37.0"
 	},
 	"icon": "doc/Kconfig_icon.png",
-	"author": {
-		"email": "trond.snekvik@gmail.com",
-		"name": "Trond Einar Snekvik",
-		"url": "https://github.com/trond-snekvik"
-	},
 	"extensionKind": [
 		"workspace"
 	],
@@ -163,9 +166,5 @@
 		"fuzzysort": "^1.1.4",
 		"yaml": "^1.7.2",
 		"glob": "7.1.6"
-	},
-	"repository": {
-		"url": "https://github.com/trond-snekvik/vscode-kconfig.git",
-		"type": "git"
 	}
 }

@@ -3,8 +3,6 @@
  * SPDX-License-Identifier: LicenseRef-Nordic-1-Clause
  */
 
-// import * as fs from 'fs';
-// import { globby } from 'globby';
 import fs = require('fs');
 import globby = require('globby');
 

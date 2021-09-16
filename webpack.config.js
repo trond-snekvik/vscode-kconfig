@@ -1,3 +1,8 @@
+/* Copyright (c) 2020 Nordic Semiconductor ASA
+ *
+ * SPDX-License-Identifier: LicenseRef-Nordic-1-Clause
+ */
+
 //@ts-check
 
 'use strict';

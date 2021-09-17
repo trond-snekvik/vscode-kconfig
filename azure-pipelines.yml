@@ -19,6 +19,10 @@ steps:
     set -o errexit -o pipefail
     echo "npm run lint" is skipped for now
   displayName: Run linter
+- script: |
+    set -o errexit -o pipefail
+    npm run copyright check
+  displayName: Check copyright statements
 - bash: |
     set -o errexit -o pipefail
     npm install -g vsce

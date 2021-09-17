@@ -1,8 +1,8 @@
-/*
- * Copyright (c) 2020 Trond Snekvik
+/* Copyright (c) 2021 Nordic Semiconductor ASA
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: LicenseRef-Nordic-1-Clause
  */
+
 import * as vscode from 'vscode';
 import { ConfigOverride, Repository, EvalContext } from "./kconfig";
 import { Token, makeExpr, tokenizeExpression, TokenKind } from './evaluate';

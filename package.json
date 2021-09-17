@@ -146,7 +146,7 @@
 		"test-compile": "tsc -p ./",
 		"lint": "node ./scripts/lint.js",
 		"lintfix": "node ./scripts/lint.js --fix",
-		"apply-copyright": "node ./scripts/copyright.js",
+		"copyright": "ts-node ./scripts/copyright.ts",
 		"updateBuildNumber": "node ./scripts/updateBuildNumber.js"
 	},
 	"devDependencies": {
@@ -155,8 +155,10 @@
 		"@types/node": "^10.12.21",
 		"@types/vscode": "^1.37.0",
 		"@types/yaml": "^1.2.0",
+		"globby": "^11.0.2",
 		"prettier": "^2.3.2",
 		"ts-loader": "^9.2.4",
+		"ts-node": "^10.2.1",
 		"tslint": "^5.12.1",
 		"typescript": "^4.3.5",
 		"webpack": "^5.47.1",

@@ -1,6 +1,6 @@
 {
 	"name": "nrf-kconfig",
-	"displayName": "Kconfig for the Zephyr Project",
+	"displayName": "nRF Kconfig",
 	"description": "Kconfig language support for the Zephyr Project",
 	"publisher": "nordic-semiconductor",
 	"author": {

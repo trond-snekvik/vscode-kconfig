@@ -12,16 +12,23 @@ import { PropFile } from './propfile';
  */
 export class Context {
     confFiles: PropFile[];
-    constructor(confFiles: vscode.Uri[], public repo: Repository, diags: vscode.DiagnosticCollection) {
-        this.confFiles = confFiles.map(uri => new PropFile(uri, this, diags));
+    constructor(
+        confFiles: vscode.Uri[],
+        public repo: Repository,
+        diags: vscode.DiagnosticCollection
+    ) {
+        this.confFiles = confFiles.map((uri) => new PropFile(uri, this, diags));
     }
 
     get overrides(): ConfigOverride[] {
-        return this.confFiles.reduce((overrides, c) => overrides.concat(c.overrides), new Array<ConfigOverride>());
+        return this.confFiles.reduce(
+            (overrides, c) => overrides.concat(c.overrides),
+            new Array<ConfigOverride>()
+        );
     }
 
     getFile(uri: vscode.Uri): PropFile | undefined {
-        return this.confFiles.find(c => c.uri.fsPath === uri.fsPath);
+        return this.confFiles.find((c) => c.uri.fsPath === uri.fsPath);
     }
 
     onChangedEditor(e?: vscode.TextEditor) {
@@ -35,6 +42,6 @@ export class Context {
     }
 
     reparse() {
-        return Promise.all(this.confFiles.map(c => c.parse()));
+        return Promise.all(this.confFiles.map((c) => c.parse()));
     }
 }

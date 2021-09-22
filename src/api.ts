@@ -16,7 +16,7 @@ interface Config {
         path?: vscode.Uri;
     };
     /** Configuration files used, in addition to the board's conf file */
-    confFiles?: vscode.Uri[],
+    confFiles?: vscode.Uri[];
     /** Root Kconfig file, or leave undefined to fall back to $ZEPHYR_ROOT/Kconfig. */
     kconfigRoot?: vscode.Uri;
 }
@@ -24,7 +24,11 @@ interface Config {
 class Api {
     public version = 2;
 
-    async activate(zephyrBase: vscode.Uri, west: string, env?: typeof process.env): Promise<boolean> {
+    async activate(
+        zephyrBase: vscode.Uri,
+        west: string,
+        env?: typeof process.env
+    ): Promise<boolean> {
         await zephyr.setWest(west, env);
         await zephyr.setZephyrBase(zephyrBase);
         return startExtension();

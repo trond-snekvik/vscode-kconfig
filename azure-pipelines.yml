@@ -19,7 +19,7 @@ steps:
 
 - script: |
     set -o errexit -o pipefail
-    echo "npm run lint" is skipped for now
+    npm run lint
   displayName: Run linter
 
 - script: |

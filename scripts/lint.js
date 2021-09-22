@@ -14,7 +14,7 @@ function spawnInPromise(command, argv) {
             env: process.env,
             shell: true,
             stdio: 'inherit',
-        }).on('exit', (code) => (code !== 0) ? reject(code) : resolve());
+        }).on('exit', (code) => (code !== 0 ? reject(code) : resolve()));
     });
 }
 
@@ -33,8 +33,7 @@ function runESLint() {
 function runPrettier() {
     const prettier = path.join('node_modules', '.bin', 'prettier');
     const configFile = `"${require.resolve('../.prettierrc.js')}"`;
-    const patterns = ['src/**/*.ts'];
-    const args = [shouldFix ? '--write' : '--check', ...patterns.map(p => `"${p}"`), '--config', configFile];
+    const args = [shouldFix ? '--write' : '--check', '--config', configFile, '.'];
     return spawnInPromise(prettier, args);
 }
 

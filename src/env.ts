@@ -12,170 +12,195 @@ var config = vscode.workspace.getConfiguration('kconfig');
 
 export var extensionContext: vscode.ExtensionContext;
 export function setExtensionContext(ctx: vscode.ExtensionContext) {
-	extensionContext = ctx;
+    extensionContext = ctx;
 }
 
 export function getConfig(name: string): any {
-	return config.get(name);
+    return config.get(name);
 }
 
-export async function setConfig(name: string, value: any, target=vscode.ConfigurationTarget.Workspace) {
-	await config.update(name, value, target);
+export async function setConfig(
+    name: string,
+    value: any,
+    target = vscode.ConfigurationTarget.Workspace
+) {
+    await config.update(name, value, target);
 }
 
 export function getRootFile(): vscode.Uri {
-	var root = getConfig('root');
-	if (!root) {
-		if (zephyr.zephyrRoot) {
-			root = zephyr.zephyrRoot + '/Kconfig';
-		} else {
-			root = '${workspaceFolder}/Kconfig';
-		}
-	}
+    var root = getConfig('root');
+    if (!root) {
+        if (zephyr.zephyrRoot) {
+            root = zephyr.zephyrRoot + '/Kconfig';
+        } else {
+            root = '${workspaceFolder}/Kconfig';
+        }
+    }
 
-	return resolvePath(root);
+    return resolvePath(root);
 }
 
 /// Root directory of project
 export function getRoot() {
-	return zephyr.zephyrRoot ?? path.dirname(getRootFile().fsPath);
+    return zephyr.zephyrRoot ?? path.dirname(getRootFile().fsPath);
 }
 
 export function findRootFromApp(appUri: vscode.Uri): string | undefined {
-	const appKconfig = path.join(appUri.fsPath, 'Kconfig');
+    const appKconfig = path.join(appUri.fsPath, 'Kconfig');
 
-	if (fs.existsSync(appKconfig)) {
-		return appKconfig;
-	} else if (zephyr.zephyrRoot) {
-		return path.join(zephyr.zephyrRoot, 'Kconfig');
-	}
+    if (fs.existsSync(appKconfig)) {
+        return appKconfig;
+    } else if (zephyr.zephyrRoot) {
+        return path.join(zephyr.zephyrRoot, 'Kconfig');
+    }
 }
 
 export function isActive(): boolean {
-	if (getConfig('disable')) {
-		return false;
-	}
+    if (getConfig('disable')) {
+        return false;
+    }
 
-	var root = getRootFile();
-	return !!(root && fs.existsSync(root.fsPath));
+    var root = getRootFile();
+    return !!(root && fs.existsSync(root.fsPath));
 }
 
 var env: { [name: string]: string };
 
 export function update() {
-	config = vscode.workspace.getConfiguration('kconfig');
-	env = zephyr.getConfig();
-	Object.assign(env, getConfig('env'));
+    config = vscode.workspace.getConfiguration('kconfig');
+    env = zephyr.getConfig();
+    Object.assign(env, getConfig('env'));
 
-	try {
-		Object.keys(env).forEach(key => {
-			var match;
-			while ((match = env[key].match(/\${(.+?)}/)) !== null) {
-				var replacement: string;
-				if (match[1] === key) {
-					vscode.window.showErrorMessage(`Kconfig environment is circular: variable ${key} references itself`);
-					throw new Error('Kconfig environment is circular');
-				} else if (match[1] in env) {
-					replacement = env[match[1]];
-				} else if (match[1].startsWith('workspaceFolder')) {
-					if (!vscode.workspace.workspaceFolders) {
-						return;
-					}
+    try {
+        Object.keys(env).forEach((key) => {
+            var match;
+            while ((match = env[key].match(/\${(.+?)}/)) !== null) {
+                var replacement: string;
+                if (match[1] === key) {
+                    vscode.window.showErrorMessage(
+                        `Kconfig environment is circular: variable ${key} references itself`
+                    );
+                    throw new Error('Kconfig environment is circular');
+                } else if (match[1] in env) {
+                    replacement = env[match[1]];
+                } else if (match[1].startsWith('workspaceFolder')) {
+                    if (!vscode.workspace.workspaceFolders) {
+                        return;
+                    }
 
-					var folder = match[1].match(/workspaceFolder:(.+)/);
-					if (folder) {
-						var wsf = vscode.workspace.workspaceFolders.find(f => f.name === folder![1]);
-						if (!wsf) {
-							return;
-						}
-						replacement = wsf.uri.fsPath;
-					} else {
-						replacement = vscode.workspace.workspaceFolders[0].uri.fsPath;
-					}
-				} else {
-					return;
-				}
+                    var folder = match[1].match(/workspaceFolder:(.+)/);
+                    if (folder) {
+                        var wsf = vscode.workspace.workspaceFolders.find(
+                            (f) => f.name === folder![1]
+                        );
+                        if (!wsf) {
+                            return;
+                        }
+                        replacement = wsf.uri.fsPath;
+                    } else {
+                        replacement = vscode.workspace.workspaceFolders[0].uri.fsPath;
+                    }
+                } else {
+                    return;
+                }
 
-				env[key] = env[key].replace(new RegExp(`\\\${${match[1]}}`, 'g'), replacement);
-			}
-		});
-	} catch (e) {
-		// ignore
-	}
+                env[key] = env[key].replace(new RegExp(`\\\${${match[1]}}`, 'g'), replacement);
+            }
+        });
+    } catch (e) {
+        // ignore
+    }
 }
 
 export function pathReplace(fileName: string): string {
-	fileName = fileName.replace('${workspaceFolder}', vscode.workspace.workspaceFolders?.[0].uri.fsPath ?? '');
-	fileName = fileName.replace(/\${workspaceFolder:(.+?)}/g, (original, name) => {
-		var folder = vscode.workspace.workspaceFolders!.find(folder => folder.name === name);
-		return folder ? folder.uri.fsPath : original;
-	});
+    fileName = fileName.replace(
+        '${workspaceFolder}',
+        vscode.workspace.workspaceFolders?.[0].uri.fsPath ?? ''
+    );
+    fileName = fileName.replace(/\${workspaceFolder:(.+?)}/g, (original, name) => {
+        var folder = vscode.workspace.workspaceFolders!.find((folder) => folder.name === name);
+        return folder ? folder.uri.fsPath : original;
+    });
 
-	fileName = fileName.replace(/\$[{(]?(\w+)[})]?/g, (original: string, v: string) => {
-		if (v in env) {
-			return env[v];
-		}
+    fileName = fileName.replace(/\$[{(]?(\w+)[})]?/g, (original: string, v: string) => {
+        if (v in env) {
+            return env[v];
+        }
 
-		if (v.startsWith('env:')) {
-			v = v.slice('env:'.length);
-		}
+        if (v.startsWith('env:')) {
+            v = v.slice('env:'.length);
+        }
 
-		if (v in process.env) {
-			return process.env[v] as string;
-		}
+        if (v in process.env) {
+            return process.env[v] as string;
+        }
 
-		return '';
-	});
+        return '';
+    });
 
-	return fileName.replace(/$\([^)]+\)/g, '');
+    return fileName.replace(/$\([^)]+\)/g, '');
 }
 
 export function getWorkspaceRoot(file: string): string {
-	if (path.isAbsolute(file)) {
-		return vscode.workspace.getWorkspaceFolder(vscode.Uri.file(file))?.uri.fsPath ?? path.dirname(file);
-	}
+    if (path.isAbsolute(file)) {
+        return (
+            vscode.workspace.getWorkspaceFolder(vscode.Uri.file(file))?.uri.fsPath ??
+            path.dirname(file)
+        );
+    }
 
-	return vscode.workspace.workspaceFolders?.find(w => fs.existsSync(path.resolve(w.uri.fsPath, file)))?.uri.fsPath ?? vscode.workspace.workspaceFolders?.[0].uri.fsPath ?? path.dirname(file);
+    return (
+        vscode.workspace.workspaceFolders?.find((w) =>
+            fs.existsSync(path.resolve(w.uri.fsPath, file))
+        )?.uri.fsPath ??
+        vscode.workspace.workspaceFolders?.[0].uri.fsPath ??
+        path.dirname(file)
+    );
 }
 
 export function resolvePath(fileName: string, base?: string): vscode.Uri {
-	if (!fileName) {
-		return vscode.Uri.file('');
-	}
+    if (!fileName) {
+        return vscode.Uri.file('');
+    }
 
-	fileName = pathReplace(fileName);
-	if (fileName.match(/^\w{2,}:\//)) { // raw URI
-		return vscode.Uri.parse(fileName);
-	}
+    fileName = pathReplace(fileName);
+    if (fileName.match(/^\w{2,}:\//)) {
+        // raw URI
+        return vscode.Uri.parse(fileName);
+    }
 
-	if (!base) {
-		base = getWorkspaceRoot(fileName);
-	}
+    if (!base) {
+        base = getWorkspaceRoot(fileName);
+    }
 
-	// Relying on the uri accepting files without schemes:
-	return vscode.Uri.file(path.resolve(base, fileName));
+    // Relying on the uri accepting files without schemes:
+    return vscode.Uri.file(path.resolve(base, fileName));
 }
 
 export type Environment = { [variable: string]: string };
 
 export function replace(text: string, env: Environment) {
-	return text.replace(/\$\((.+?)\)/, (original, variable) => ((variable in env) ? env[variable] : original));
+    return text.replace(/\$\((.+?)\)/, (original, variable) =>
+        variable in env ? env[variable] : original
+    );
 }
 
-var filemap: {[scheme: string]: (uri: vscode.Uri) => string} = {};
+var filemap: { [scheme: string]: (uri: vscode.Uri) => string } = {};
 
 export function readFile(uri: vscode.Uri): string {
-	if (uri.scheme in filemap) {
-		return filemap[uri.scheme](uri);
-	}
+    if (uri.scheme in filemap) {
+        return filemap[uri.scheme](uri);
+    }
 
-	console.error(`Unknown file ${uri.toString()}`);
+    console.error(`Unknown file ${uri.toString()}`);
 
-	return '';
+    return '';
 }
 
 export function registerFileProvider(scheme: string, cb: (uri: vscode.Uri) => string) {
-	filemap[scheme] = cb;
+    filemap[scheme] = cb;
 }
 
-registerFileProvider('file', (uri: vscode.Uri) => fs.readFileSync(uri.fsPath, {encoding: 'utf-8'}));
+registerFileProvider('file', (uri: vscode.Uri) =>
+    fs.readFileSync(uri.fsPath, { encoding: 'utf-8' })
+);

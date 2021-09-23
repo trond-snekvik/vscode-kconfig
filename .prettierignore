@@ -1,0 +1,8 @@
+/out
+/.vscode
+
+*.md
+*.yml
+
+package.json
+package-lock.json

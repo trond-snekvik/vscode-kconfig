@@ -11,18 +11,22 @@ steps:
   inputs:
     versionSpec: 14
   displayName: Install Node.js
+
 - script: |
     set -o errexit -o pipefail
     npm ci
   displayName: Install dependencies
+
 - script: |
     set -o errexit -o pipefail
-    echo "npm run lint" is skipped for now
+    npm run lint
   displayName: Run linter
+
 - script: |
     set -o errexit -o pipefail
     npm run copyright check
   displayName: Check copyright statements
+
 - bash: |
     set -o errexit -o pipefail
     npm install -g vsce
@@ -31,6 +35,7 @@ steps:
     pkg=$(ls *.vsix)
     mv -v ${pkg} "$(Build.ArtifactStagingDirectory)/${pkg}"
   displayName: Pack and build extension
+
 - task: PublishPipelineArtifact@1
   inputs:
     targetPath: $(Build.ArtifactStagingDirectory)

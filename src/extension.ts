@@ -626,6 +626,10 @@ export function activate(context: vscode.ExtensionContext) {
 		return;
 	}
 
+	if (vscode.extensions.getExtension('nordic-semiconductor.nrf-kconfig')) {
+		return;
+	}
+
 	zephyr.activate(context).then(foundZephyr => {
 		if (!foundZephyr) {
 			return;

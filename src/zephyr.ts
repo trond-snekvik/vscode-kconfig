@@ -43,22 +43,40 @@ function west(args: string[], callback?: (err: ExecException | null, stdout: str
 	return '';
 }
 
-export function getKconfigRoots() {
+interface ModuleRoot {
+	name: string;
+	path: string;
+}
+
+export function getKconfigRoots(): ModuleRoot[] {
 	var modules = getModules();
 
-	return Object.values(modules)
-		.map(m => {
-			var file = m + "/zephyr/module.yml";
+	return Object.entries(modules)
+		.map(([name, dir]) => {
+			var file = dir + "/zephyr/module.yml";
 			if (!fs.existsSync(file)) {
-				return m + "/zephyr/Kconfig";
+				return {
+					name,
+					path: dir + "/zephyr/Kconfig"
+				};
 			}
 
 			var text = fs.readFileSync(file).toString("utf-8");
 			var obj = yaml.parse(text);
 
-			return m + "/" + (obj?.["build"]?.["kconfig"] ?? "zephyr/Kconfig");
+			if (obj?.build?.['kconfig-ext']) {
+				return {
+					name,
+					path: path.join(zephyrRoot!, 'modules', name, 'Kconfig'),
+				};
+			}
+
+			return {
+				name,
+				path: dir + "/" + (obj?.build?.kconfig ?? "zephyr/Kconfig"),
+			};
 		})
-		.filter(file => fs.existsSync(file));
+		.filter(module => fs.existsSync(module.path));
 }
 
 var toolchain_kconfig_dir: string;
@@ -165,7 +183,15 @@ function getKconfigSocRoots() {
 
 function provideDoc(uri: vscode.Uri) {
 	if (uri.toString() === MODULE_FILE.toString()) {
-		return getKconfigRoots().map(root => `osource "${root}"`).join('\n\n');
+		return getKconfigRoots().map(module => [
+			`menu "${module.name} (${module.path})"`,
+			`osource "${module.path}"`,
+			`config ZEPHYR_${module.name.replace(/[^\w]/g, '_').toUpperCase()}_MODULE`,
+			`\tbool`,
+			`\tdefault y`,
+			`endmenu`,
+		].join('\n')
+		).join('\n\n');
 	}
 	if (uri.toString() === SOC_DEFCONFIG_FILE.toString()) {
 		return getKconfigSocRoots().map(root => `osource "${root}/soc/$(ARCH)/*/Kconfig.defconfig"`).join('\n');

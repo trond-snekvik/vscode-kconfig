@@ -270,7 +270,7 @@ function getZephyrBase(): string | undefined {
 			base = base.replace(/^~\//, env['HOME'] as string + '/');
 		}
 
-		return path.resolve(base);
+		return kEnv.pathReplace(base);
 	}
 
 	return process.env['ZEPHYR_BASE'] as string;

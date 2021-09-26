@@ -101,8 +101,8 @@ export function pathReplace(fileName: string): string {
 		return folder ? folder.uri.fsPath : original;
 	});
 
-	fileName = fileName.replace(/\$[{(]?(\w+)[})]?/g, (original: string, v: string) => {
-		if (v in env) {
+	fileName = fileName.replace(/\$[{(]?([^})]+)[})]?/g, (original: string, v: string) => {
+		if (env && v in env) {
 			return env[v];
 		}
 

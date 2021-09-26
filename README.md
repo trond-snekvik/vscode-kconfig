@@ -1,8 +1,11 @@
 # Kconfig for the Zephyr Project
 
+**NOTE: This extension will be deprecated in favor of [Nordic Semiconductor's Kconfig extension](https://marketplace.visualstudio.com/items?itemName=nordic-semiconductor.nrf-kconfig). To get access to new features and an improved Kconfig editing experience in VS Code, please consider installing Nordic's extension.**
+
 Kconfig language support for the [Zephyr Project](https://www.zephyrproject.org/) in VS Code.
 
 This extension is an independent community contribution, and is not part of the Zephyr Project.
+
 
 ## Features
 

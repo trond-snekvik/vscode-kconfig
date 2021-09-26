@@ -1,3 +1,15 @@
+# v1.2.0 Transition to Nordic Semiconductor's extension
+
+This release disables the extension if [Nordic Semiconductor's extension](https://marketplace.visualstudio.com/items?itemName=nordic-semiconductor.nrf-kconfig) is present.
+In the future, this extension will be deprecated in favor of Nordic's official extension, and all new features will be implemented in that extension instead.
+
+- Disable extension functionality if Nordic Semiconductor's extension is installed
+- Update icon to fix new Zephyr documentation style
+- Fix expansion of environment variables in configuration
+- Support new Kconfig.module format
+- Support `kconfig-ext` in west modules
+- Highlight expression operators
+
 # v1.1.8 Force Zephyr resolution
 
 - Block the language handling until Zephyr is resolved

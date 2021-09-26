@@ -144,8 +144,8 @@
             ]
         },
         "expression-operators": {
-            "match": "(=|!=|<|>|<=|>=|!|&&|\\|\\|\\(|\\))",
-            "name": "keyword.operator"
+            "match": "(=|!=|<|>|<=|>=|!|&&|\\|\\||\\(|\\))",
+            "name": "keyword.operator.logical"
         },
         "number": {
             "match": "\\b[+-]?(0x[\\da-fA-F]+|[0-9]+)\\b",

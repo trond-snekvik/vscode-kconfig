@@ -108,7 +108,6 @@ export function boardConfFile(): vscode.Uri | undefined {
 
 export function setBoard(b: BoardTuple) {
     board = b;
-    kEnv.setConfig('zephyr.board', b);
     kEnv.update();
 }
 
@@ -364,7 +363,6 @@ function getZephyrBase(): string | undefined {
 export async function setZephyrBase(uri: vscode.Uri): Promise<void> {
     if (uri.fsPath !== zephyrRoot) {
         zephyrRoot = uri.fsPath;
-        await kEnv.setConfig('zephyr.base', zephyrRoot);
     }
 }
 
@@ -456,7 +454,6 @@ export async function setWest(westUri: string, env?: typeof process.env): Promis
 
     if (westUri !== westExe) {
         westExe = westUri;
-        await kEnv.setConfig('zephyr.west', westExe);
     }
 }
 

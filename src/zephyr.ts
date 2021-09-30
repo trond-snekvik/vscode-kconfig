@@ -108,6 +108,10 @@ export function boardConfFile(): vscode.Uri | undefined {
 
 export function setBoard(b: BoardTuple) {
     board = b;
+    if (boardStatus) {
+        boardStatus.text = `$(circuit-board) ${b.board}`;
+    }
+
     kEnv.update();
 }
 
@@ -180,6 +184,7 @@ export async function selectBoard() {
                 return;
             }
 
+            setBoard(selection.board);
             updateBoardConfig(selection.board);
         });
 }
@@ -200,23 +205,13 @@ export async function boardFromName(id: string, uri?: vscode.Uri): Promise<Board
 }
 
 function updateBoardConfig(newBoard: BoardTuple) {
-    if (
-        newBoard.board !== board?.board ||
-        newBoard.arch !== board?.arch ||
-        newBoard.dir !== board?.dir
-    ) {
-        if (boardStatus) {
-            boardStatus.text = `$(circuit-board) ${newBoard.board}`;
-        }
-        setBoard(newBoard);
-        vscode.workspace
-            .getConfiguration('kconfig')
-            .update('zephyr.board', board, vscode.ConfigurationTarget.Workspace)
-            .then(
-                () => console.log(`Stored new board ${newBoard.board}`),
-                (err) => console.error(`Failed storing board ${err}`)
-            );
-    }
+    vscode.workspace
+        .getConfiguration('kconfig')
+        .update('zephyr.board', board, vscode.ConfigurationTarget.Workspace)
+        .then(
+            () => console.log(`Stored new board ${newBoard.board}`),
+            (err) => console.error(`Failed storing board ${err}`)
+    );
 }
 
 export function getModules() {

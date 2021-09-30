@@ -211,7 +211,7 @@ function updateBoardConfig(newBoard: BoardTuple) {
         .then(
             () => console.log(`Stored new board ${newBoard.board}`),
             (err) => console.error(`Failed storing board ${err}`)
-    );
+        );
 }
 
 export function getModules() {

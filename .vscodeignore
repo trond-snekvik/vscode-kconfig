@@ -7,3 +7,4 @@ webpack.config.js
 dist/test
 .gitignore
 tslint.json
+coverage.xml

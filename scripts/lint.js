@@ -21,7 +21,7 @@ function spawnInPromise(command, argv) {
 function runESLint() {
     const eslint = path.join('node_modules', '.bin', 'eslint');
     const configFile = `"${require.resolve('../.eslintrc.js')}"`;
-    const args = ['src', '--ext', '.ts', '--config', configFile];
+    const args = ['src', '--config', configFile];
 
     if (shouldFix) {
         args.push('--fix');
@@ -33,13 +33,8 @@ function runESLint() {
 function runPrettier() {
     const prettier = path.join('node_modules', '.bin', 'prettier');
     const configFile = `"${require.resolve('../.prettierrc.js')}"`;
-    const args = [shouldFix ? '--write' : '--check', '--config', configFile, '.'];
+    const args = [shouldFix ? '--write' : '--check', '--config', configFile, 'src'];
     return spawnInPromise(prettier, args);
 }
 
-function checkTypeScriptTypes() {
-    const tsc = path.join('node_modules', '.bin', 'tsc');
-    return spawnInPromise(tsc, ['--noEmit']);
-}
-
-runPrettier().then(runESLint).then(checkTypeScriptTypes).catch(process.exit);
+runPrettier().then(runESLint).catch(process.exit);

@@ -15,17 +15,29 @@
             "outFiles": [
                 "${workspaceFolder}/dist/**/*.js"
             ],
-            "preLaunchTask": "npm: webpack"
+            "preLaunchTask": "${defaultBuildTask}"
+        },
+        {
+            "name": "Attach to language server",
+            "type": "python",
+            "request": "attach",
+            "port": 5678,
+            "preLaunchTask": "sleep"
         },
         {
             "name": "Launch Tests",
             "type": "extensionHost",
             "request": "launch",
             "runtimeExecutable": "${execPath}",
-            "args": ["--extensionDevelopmentPath=${workspaceRoot}", "--extensionTestsPath=${workspaceRoot}/dist/test" ],
+            "args": [
+                "--extensionDevelopmentPath=${workspaceRoot}",
+                "--extensionTestsPath=${workspaceRoot}/dist/test"
+            ],
             "stopOnEntry": false,
             "sourceMaps": true,
-            "outFiles": [ "${workspaceRoot}/dist/test/**/*.js" ],
+            "outFiles": [
+                "${workspaceRoot}/dist/test/**/*.js"
+            ],
             "preLaunchTask": "npm: webpack"
         }
     ]

@@ -4,248 +4,179 @@
  */
 
 import * as vscode from 'vscode';
-import * as path from 'path';
-import * as glob from 'glob';
 import {
-    Repository,
     Scope,
-    Config,
     ConfigValueType,
     ConfigEntry,
-    ConfigKind,
     IfScope,
     MenuScope,
     ChoiceScope,
     ChoiceEntry,
     Comment,
+    RootScope,
 } from './kconfig';
-import * as kEnv from './env';
-import { createExpression } from './evaluate';
 
-type FileInclusion = { range: vscode.Range; file: ParsedFile };
+type FileInclusion = { range: vscode.Range; path: string; relative: boolean };
 
 export class ParsedFile {
-    // Some properties are immutable, and are part of the file's identification:
-    readonly uri: vscode.Uri;
-    readonly repo: Repository;
-    readonly parent?: ParsedFile;
-    readonly env: { [name: string]: string };
-    readonly scope: Scope;
-
-    version: number;
     inclusions: FileInclusion[];
     entries: ConfigEntry[];
     diags: vscode.Diagnostic[];
+    root: Scope;
+    parsed: boolean;
+    lineRange: vscode.Range | undefined;
+    line = '';
 
-    constructor(
-        repo: Repository,
-        uri: vscode.Uri,
-        env: { [name: string]: string },
-        scope: Scope,
-        parent?: ParsedFile
-    ) {
-        this.repo = repo;
-        this.uri = uri;
-        this.env = { ...env };
-        this.scope = scope;
-        this.parent = parent;
-
+    constructor(public readonly doc: vscode.TextDocument) {
         this.inclusions = [];
         this.entries = [];
         this.diags = [];
-        this.version = 0;
+        this.root = new RootScope(this);
+        this.parsed = false;
     }
 
-    match(other: ParsedFile): boolean {
-        var myEnvKeys = Object.keys(this.env);
+    get uri(): vscode.Uri {
+        return this.doc.uri;
+    }
+
+    reset(): void {
+        this.diags = [];
+        this.entries = [];
+        this.inclusions = [];
+        this.root = new RootScope(this);
+    }
+
+    private getString(text: string) {
+        const match = text.match(/^"(.*?)"\s*(?:$|#.*)/) ?? text.match(/^(\S+)\s*(?:$|#.*)/);
+        return match?.[1];
+    }
+
+    private getSymbol(text: string) {
+        return text.match(/^((?:\w+|\$\([\w-]+\))+)\s*(?:$|#.*)/)?.[1];
+    }
+
+    private getNumber(text: string) {
+        return text.match(/^[+-]?(0x[a-f\d]+|\d+)\b/)?.[0];
+    }
+
+    private getExpression(text: string) {
+        if (text.startsWith('"')) {
+            return this.getString(text);
+        }
+
         return (
-            this.uri.fsPath === other.uri.fsPath &&
-            Object.keys(other.env).length === myEnvKeys.length &&
-            myEnvKeys.every((key) => key in other.env && other.env[key] === this.env[key]) &&
-            (this.scope === other.scope || (!!this.scope && !!other.scope?.match(this.scope))) &&
-            (this.parent === other.parent || (!!this.parent && !!other.parent?.match(this.parent)))
+            this.getNumber(text) ??
+            text.match(
+                /^((?:(\|\||&&|!?\s*\(|[)<>]|[!<>]?=|"[^"]*"|'[^']*'|!?\s*\w+\b|!?\$\(.*\))\s*)+)\s*(?:$|#.*)/
+            )?.[1]
         );
     }
 
-    get links(): vscode.DocumentLink[] {
-        var thisDir = path.dirname(this.uri.fsPath);
-        return this.inclusions.map((i) => {
-            var link = new vscode.DocumentLink(i.range, i.file.uri);
-            if (i.file.uri.scheme === 'file') {
-                link.tooltip = path.relative(thisDir, i.file.uri.fsPath);
-            }
-            return link;
+    private getIf(text: string): string | undefined | vscode.Diagnostic {
+        const ifMatch = text.match(/^\bif\s+(.*)/);
+        const ifRange = this.lineRange!.with({
+            start: new vscode.Position(
+                this.lineRange!.start.line,
+                this.line.indexOf('if') + 'if'.length
+            ),
         });
-    }
 
-    onDidChange(change?: vscode.TextDocumentChangeEvent) {
-        if (change) {
-            if (change.document.version === this.version) {
-                console.log(`Duplicate version of ${change.document.fileName}`);
-                return;
+        if (ifMatch) {
+            const expr = this.getExpression(ifMatch[1]);
+            if (!expr) {
+                return new vscode.Diagnostic(
+                    ifRange,
+                    'Invalid expression',
+                    vscode.DiagnosticSeverity.Error
+                );
             }
-            this.version = change.document.version;
-            var firstDirtyLine = Math.min(...change.contentChanges.map((c) => c.range.start.line));
+
+            return expr;
         }
 
-        var oldInclusions = this.inclusions;
-
-        if (this.scope) {
-            this.scope.children = this.scope.children.filter(
-                (c) => !(c instanceof Scope) || c.file !== this
+        if (text.startsWith('if')) {
+            return new vscode.Diagnostic(
+                ifRange,
+                'Expected expression',
+                vscode.DiagnosticSeverity.Error
             );
         }
 
-        this.wipeEntries();
-
-        this.parseRaw(change ? change.document.getText() : kEnv.readFile(this.uri));
-
-        this.inclusions.forEach((i) => {
-            var existingIndex: number;
-            if (i.range.end.line < firstDirtyLine) {
-                // Optimization, matching is a bit expensive
-                existingIndex = oldInclusions.findIndex(
-                    (ii) => ii.range.start.line === i.range.start.line
-                );
-            } else {
-                existingIndex = oldInclusions.findIndex((ii) => ii.file.match(i.file));
-            }
-
-            if (existingIndex > -1) {
-                i.file = oldInclusions.splice(existingIndex, 1)[0].file;
-            } else {
-                i.file.parse();
-            }
-        });
-
-        // the remaining old inclusions have been removed from the new version of the document, recursively wipe that tree:
-        oldInclusions.forEach((i) => i.file.delete());
+        return undefined;
     }
 
-    wipeEntries() {
-        this.entries.splice(0).forEach((e) => {
-            e.config.removeEntry(e);
-        });
-    }
+    private getExprIf(text: string) {
+        let expr = text;
 
-    delete() {
-        this.wipeEntries();
-        if (this.scope) {
-            this.scope.children = this.scope.children.filter((c) => c.file !== this);
+        const match = text.match(/\sif\s.*/);
+        if (match) {
+            expr = text.slice(0, match.index! + 1);
         }
 
-        this.inclusions.splice(0).forEach((i) => i.file.delete());
+        const condition = this.getIf(match?.[0].trim() ?? '');
+        if (condition instanceof vscode.Diagnostic) {
+            return condition;
+        }
+
+        if (this.getExpression(expr) === undefined && this.getString(expr) === undefined) {
+            return new vscode.Diagnostic(
+                this.lineRange!,
+                `Expected expression`,
+                vscode.DiagnosticSeverity.Error
+            );
+        }
+
+        return [expr, condition] as const;
     }
 
-    reset() {
-        this.diags = [];
-        this.inclusions = [];
-    }
-
-    children(): ParsedFile[] {
-        var files: ParsedFile[] = [];
-
-        this.inclusions.forEach((i) => {
-            files.push(i.file);
-            files.push(...i.file.children());
-        });
-
-        return files;
-    }
-
-    parse() {
-        this.parseRaw(kEnv.readFile(this.uri));
-
-        this.inclusions.forEach((i) => i.file.parse());
-    }
-
-    private parseRaw(text: string) {
+    parse(): void {
+        const text = this.doc.getText();
         this.reset();
-        var choice: ChoiceEntry | null = null;
-        var env = { ...this.env };
-        var scope = this.scope;
-        if (scope instanceof ChoiceScope) {
-            choice = scope.choice;
-        }
+        const scopes = [this.root];
 
-        var lines = text.split(/\r?\n/g);
+        const lines = text.split(/\r?\n/g);
         if (!lines) {
             return;
         }
 
-        var setScope = (s: Scope) => {
-            if (s && scope) {
-                scope = scope.addScope(s);
-            } else {
-                scope = s;
-            }
+        const getScope = () => {
+            return scopes[scopes.length - 1];
         };
 
-        var unterminatedScope = (s?: Scope) => {
-            if (s) {
-                var type = s.id.split('(')[0];
-                this.diags.push(
-                    new vscode.Diagnostic(
-                        new vscode.Range(s.lines.start, 0, s.lines.start, 9999),
-                        `Unterminated ${type}. Expected matching end${type} before end of parent scope.`,
-                        vscode.DiagnosticSeverity.Error
-                    )
-                );
-            }
+        const setScope = (s: Scope) => {
+            scopes[scopes.length - 1].addScope(s);
+            scopes.push(s);
         };
 
-        const configMatch = /^\s*(menuconfig|config)\s+(\w+)/;
-        const sourceMatch = /^(\s*(o)?(r)?source\s+)"((?:.*?[^\\])?)"/;
-        const choiceMatch = /^\s*choice(?:\s+(\w+))?/;
-        const endChoiceMatch = /^\s*endchoice\b/;
-        const ifMatch = /^\s*if\s+([^#]+)/;
-        const endifMatch = /^\s*endif\b/;
-        const menuMatch = /^\s*((?:main)?menu)\s+"((?:.*?[^\\])?)"/;
-        const endMenuMatch = /^\s*endmenu\b/;
-        const depOnMatch = /^\s*depends\s+on\s+([^#]+)/;
-        const envMatch = /^\s*([\w\-]+)\s*=\s*([^#]+)/;
-        const typeMatch = /^\s*(bool|tristate|string|hex|int)(?:\s+"((?:.*?[^\\])?)")?/;
-        const selectMatch = /^\s*(?:select|imply)\s+(\w+)(?:\s+if\s+([^#]+))?/;
-        const promptMatch = /^\s*prompt\s+"((?:.*?[^\\])?)"/;
-        const helpMatch = /^\s*help\b/;
-        const defaultMatch = /^\s*default\s+([^#]+)/;
-        const visibleMatch = /^\s*visible\s+if\s+([^#]+)/;
-        const defMatch = /^\s*def_(bool|tristate|int|hex)\s+([^#]+)/;
-        const defStringMatch = /^\s*def_string\s+"((?:.*?[^\\])?)"(?:\s+if\s+([^#]+))?/;
-        const rangeMatch =
-            /^\s*range\s+([\-+]?\w+|\$\(.*?\))\s+([\-+]?\w+|\$\(.*?\))(?:\s+if\s+([^#]+))?/;
-
-        var entry: ConfigEntry | null = null;
-        var comment: Comment | null = null;
-        var help = false;
-        var helpIndent: string | null = null;
-        for (var lineNumber = 0; lineNumber < lines.length; lineNumber++) {
-            var line = kEnv.replace(lines[lineNumber], env);
-
-            var startLineNumber = lineNumber;
+        let entry: ConfigEntry | null = null;
+        let help = false;
+        let helpIndent: string | null = null;
+        for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
+            this.line = lines[lineNumber];
+            const startLineNumber = lineNumber;
 
             /* If lines end with \, the line ending should be ignored: */
-            while (line.endsWith('\\') && lineNumber < lines.length - 1) {
-                line = line.slice(0, line.length - 1) + kEnv.replace(lines[++lineNumber], env);
+            while (this.line.endsWith('\\') && lineNumber < lines.length - 1) {
+                this.line = this.line.slice(0, this.line.length - 1) + lines[++lineNumber];
             }
 
-            if (line.length === 0) {
+            if (this.line.length === 0) {
                 if (help && entry?.help) {
                     entry.help += '\n\n';
                 }
                 continue;
             }
 
-            var lineRange = new vscode.Range(startLineNumber, 0, lineNumber, line.length);
+            this.lineRange = new vscode.Range(startLineNumber, 0, lineNumber, this.line.length);
 
             if (help) {
-                var indent = line.replace(/\t/g, ' '.repeat(8)).match(/^\s*/)![0];
+                const indent = this.line.replace(/\t/g, ' '.repeat(8)).match(/^\s*/)![0];
                 if (helpIndent === null) {
                     helpIndent = indent;
                 }
                 if (indent.startsWith(helpIndent)) {
                     if (entry) {
-                        entry.help += ' ' + line.trim();
+                        entry.help += ' ' + this.line.trim();
                         entry.extend(lineNumber);
                     }
                 } else {
@@ -260,371 +191,560 @@ export class ParsedFile {
                 continue;
             }
 
-            if (line.match(/^\s*(#|$)/)) {
+            if (this.line.match(/^\s*(#|$)/)) {
                 continue;
             }
 
-            var name: string;
-            var match = line.match(configMatch);
-            var c: Config;
-            if (match) {
-                name = match[2];
-                if (name in this.repo.configs) {
-                    c = this.repo.configs[name];
-                } else {
-                    c = new Config(name, match[1] as ConfigKind, this.repo);
-                    this.repo.configs[name] = c;
-                }
-
-                entry = new ConfigEntry(c, lineNumber, this, scope);
-
-                this.entries.push(entry);
-
-                if (choice) {
-                    choice.choices.push(entry.config);
-                }
+            /**
+             * Kconfig only contains one statement per line, and each type of statement
+             * starts with a different keyword. Fetch the first word of each line, and use
+             * that as a basis for parsing, to reduce the amount of regex comparisons executed
+             * on each line:
+             */
+            const lineMatch = this.line.match(/^\s*(\w+)(?:\s+(.*)|$)/);
+            if (!lineMatch) {
                 continue;
             }
-            match = line.match(sourceMatch);
-            if (match) {
-                let baseDir: string;
-                let optional = !!match[2];
-                let relative = !!match[3];
-                if (relative) {
-                    baseDir = path.dirname(this.uri.fsPath);
-                } else {
-                    baseDir = kEnv.getRoot();
-                }
-                let includeFile = kEnv.resolvePath(match[4], baseDir);
-                let range = new vscode.Range(
-                    new vscode.Position(lineNumber, match[1].length + 1),
-                    new vscode.Position(lineNumber, match[0].length - 1)
-                );
-                if (includeFile.scheme === 'file') {
-                    let matches = glob.sync(includeFile.fsPath);
-                    matches.forEach((match) => {
-                        this.inclusions.push({
-                            range: range,
-                            file: new ParsedFile(
-                                this.repo,
-                                vscode.Uri.file(match),
-                                env,
-                                scope,
-                                this
-                            ),
-                        });
-                    });
-                    if (matches.length === 0 && !optional) {
-                        console.log(
-                            `Unable to resolve include ${match[4]} @ ${this.uri.fsPath}:L${
-                                lineNumber + 1
-                            }`
-                        );
-                        this.diags.push(
-                            new vscode.Diagnostic(lineRange, 'Unable to resolve include')
-                        );
+
+            const firstWord = lineMatch[1];
+            const rest = lineMatch[2] ?? '';
+
+            let match;
+            switch (firstWord) {
+                /*
+                 * Root level statements:
+                 */
+                case 'comment':
+                    match = this.getString(rest);
+                    if (match) {
+                        getScope().children.push(new Comment(match, this, lineNumber));
                     }
-                } else {
-                    this.inclusions.push({
-                        range: range,
-                        file: new ParsedFile(this.repo, includeFile, env, scope, this),
-                    });
-                }
-                continue;
-            }
-            match = line.match(choiceMatch);
-            if (match) {
-                name =
-                    match[1] ||
-                    `<choice @ ${vscode.workspace.asRelativePath(this.uri.fsPath)}:${lineNumber}>`;
-                choice = new ChoiceEntry(name, lineNumber, this.repo, this, scope);
-                setScope(new ChoiceScope(choice));
-                entry = choice;
-                continue;
-            }
-            match = line.match(endChoiceMatch);
-            if (match) {
-                entry = null;
-                choice = null;
-                if (scope instanceof ChoiceScope) {
-                    scope.lines.end = lineNumber;
-                    scope = scope.parent!;
-                } else {
-                    this.diags.push(
-                        new vscode.Diagnostic(
-                            lineRange,
-                            `Unexpected endchoice`,
-                            vscode.DiagnosticSeverity.Error
-                        )
-                    );
-                    unterminatedScope(scope);
-                }
-                continue;
-            }
-            match = line.match(ifMatch);
-            if (match) {
-                entry = null;
-                setScope(new IfScope(match[1], this.repo, lineNumber, this, scope!));
-                continue;
-            }
-            match = line.match(endifMatch);
-            if (match) {
-                entry = null;
-                if (scope instanceof IfScope) {
-                    scope.lines.end = lineNumber;
-                    scope = scope.parent;
-                } else {
-                    this.diags.push(
-                        new vscode.Diagnostic(
-                            lineRange,
-                            `Unexpected endif`,
-                            vscode.DiagnosticSeverity.Error
-                        )
-                    );
-                    unterminatedScope(scope);
-                }
-                continue;
-            }
-            match = line.match(menuMatch);
-            if (match) {
-                entry = null;
-                setScope(new MenuScope(match[2], this.repo, lineNumber, this, scope!));
-                continue;
-            }
-            match = line.match(endMenuMatch);
-            if (match) {
-                entry = null;
-                if (scope instanceof MenuScope) {
-                    scope.lines.end = lineNumber;
-                    scope = scope.parent;
-                } else {
-                    this.diags.push(
-                        new vscode.Diagnostic(
-                            lineRange,
-                            `Unexpected endmenu`,
-                            vscode.DiagnosticSeverity.Error
-                        )
-                    );
-                    unterminatedScope(scope);
-                }
-                continue;
-            }
-            match = line.match(depOnMatch);
-            if (match) {
-                var depOn = match[1].trim().replace(/\s+/g, ' ');
-                if (entry) {
-                    entry.extend(lineNumber);
+                    break;
 
-                    if (entry.dependencies.includes(depOn)) {
+                case 'config':
+                case 'menuconfig':
+                    match = this.getSymbol(rest);
+                    if (match) {
+                        entry = new ConfigEntry(match, startLineNumber, this);
+                        this.entries.push(entry);
+                        getScope().children.push(entry);
+                    } else {
                         this.diags.push(
                             new vscode.Diagnostic(
-                                lineRange,
-                                `Duplicate dependency`,
-                                vscode.DiagnosticSeverity.Warning
+                                this.lineRange,
+                                'Expected name',
+                                vscode.DiagnosticSeverity.Error
+                            )
+                        );
+                        entry = null;
+                    }
+                    break;
+
+                case 'choice': {
+                    match = this.getSymbol(rest);
+                    const path = vscode.workspace.asRelativePath(this.uri);
+                    entry = new ChoiceEntry(
+                        match ?? `<choice at ${path}:${lineNumber + 1}>`,
+                        lineNumber,
+                        this
+                    );
+                    setScope(new ChoiceScope(entry as ChoiceEntry));
+                    break;
+                }
+                case 'source':
+                case 'osource':
+                case 'orsource':
+                case 'rsource': {
+                    const path = this.getString(rest);
+                    if (!path) {
+                        this.diags.push(
+                            new vscode.Diagnostic(
+                                this.lineRange,
+                                'Expected path string',
+                                vscode.DiagnosticSeverity.Error
+                            )
+                        );
+                        break;
+                    }
+                    this.inclusions.push({
+                        range: new vscode.Range(
+                            lineNumber,
+                            this.line.indexOf('"'),
+                            lineNumber,
+                            this.line.lastIndexOf('"') + 1
+                        ),
+                        path,
+                        relative: ['rsource', 'orsource'].includes(firstWord),
+                    });
+                    break;
+                }
+
+                case 'if':
+                    entry = null;
+                    match = this.getExpression(rest);
+                    if (match) {
+                        setScope(new IfScope(match, lineNumber, this));
+                    } else if (rest.match(/^\s*(#.*)?$/)) {
+                        this.diags.push(
+                            new vscode.Diagnostic(
+                                this.lineRange,
+                                'Expected expression',
+                                vscode.DiagnosticSeverity.Error
+                            )
+                        );
+                    } else {
+                        this.diags.push(
+                            new vscode.Diagnostic(
+                                this.lineRange,
+                                'Invalid expression',
+                                vscode.DiagnosticSeverity.Error
                             )
                         );
                     }
-                    entry.dependencies.push(depOn); // need to push the duplicate, in case someone changes the other location to remove the duplication
-                } else if (scope instanceof MenuScope) {
-                    scope.dependencies.push(depOn);
-                } else {
+                    break;
+
+                case 'mainmenu':
+                    entry = null;
+                    match = this.getString(rest);
+                    if (!match) {
+                        this.diags.push(
+                            new vscode.Diagnostic(
+                                this.lineRange,
+                                'Expected prompt',
+                                vscode.DiagnosticSeverity.Error
+                            )
+                        );
+                    }
+                    break;
+
+                case 'menu':
+                    entry = null;
+                    match = this.getString(rest);
+                    if (match) {
+                        setScope(new MenuScope(match, lineNumber, this));
+                    } else {
+                        this.diags.push(
+                            new vscode.Diagnostic(
+                                this.lineRange,
+                                'Expected prompt',
+                                vscode.DiagnosticSeverity.Error
+                            )
+                        );
+                    }
+                    break;
+
+                /**
+                 * Config entry attributes:
+                 */
+
+                case 'bool':
+                case 'tristate':
+                case 'string':
+                case 'hex':
+                case 'int':
+                    if (!entry) {
+                        this.diags.push(
+                            new vscode.Diagnostic(
+                                this.lineRange,
+                                'Unexpected type outside config entry',
+                                vscode.DiagnosticSeverity.Error
+                            )
+                        );
+                        break;
+                    }
+
+                    entry.type = firstWord;
+                    match = this.getString(rest);
+                    if (match) {
+                        entry.prompt = match;
+                    }
+
+                    entry.extend(lineNumber);
+                    break;
+
+                case 'prompt':
+                    if (!entry) {
+                        this.diags.push(
+                            new vscode.Diagnostic(
+                                this.lineRange,
+                                'Unexpected prompt outside config entry',
+                                vscode.DiagnosticSeverity.Error
+                            )
+                        );
+                        break;
+                    }
+                    match = rest.match(/^"(.*)"\s*(.*)/);
+                    if (match) {
+                        const condition = this.getIf(match[2]);
+                        if (condition instanceof vscode.Diagnostic) {
+                            this.diags.push(condition);
+                            break;
+                        }
+
+                        entry.prompt = match[1];
+                    } else {
+                        this.diags.push(
+                            new vscode.Diagnostic(
+                                this.lineRange,
+                                'Expected prompt',
+                                vscode.DiagnosticSeverity.Error
+                            )
+                        );
+                    }
+                    entry.extend(lineNumber);
+                    break;
+
+                case 'imply':
+                case 'select': {
+                    if (!entry) {
+                        this.diags.push(
+                            new vscode.Diagnostic(
+                                this.lineRange,
+                                `Unexpected ${firstWord} outside config entry`,
+                                vscode.DiagnosticSeverity.Error
+                            )
+                        );
+                        break;
+                    }
+
+                    match = rest.match(/^(\w+)(?:\s*(.*))?/);
+                    if (!match) {
+                        this.diags.push(
+                            new vscode.Diagnostic(
+                                this.lineRange,
+                                `Expected symbol`,
+                                vscode.DiagnosticSeverity.Error
+                            )
+                        );
+                        break;
+                    }
+
+                    const condition = this.getIf(match[2] ?? '');
+                    if (condition instanceof vscode.Diagnostic) {
+                        this.diags.push(condition);
+                        break;
+                    }
+
+                    if (firstWord === 'imply') {
+                        entry.implys.push({ name: match[1], condition });
+                    } else {
+                        entry.selects.push({ name: match[1], condition });
+                    }
+                    entry.extend(lineNumber);
+                    break;
+                }
+
+                case 'option':
+                    if (!entry) {
+                        this.diags.push(
+                            new vscode.Diagnostic(
+                                this.lineRange,
+                                `Unexpected ${firstWord} outside config entry`,
+                                vscode.DiagnosticSeverity.Error
+                            )
+                        );
+                        break;
+                    }
+
+                    match = rest.match(/^env=(.*)/);
+                    if (match) {
+                        const str = this.getString(match[1]);
+                        if (!str) {
+                            this.diags.push(
+                                new vscode.Diagnostic(
+                                    this.lineRange,
+                                    `Expected value after option env`,
+                                    vscode.DiagnosticSeverity.Error
+                                )
+                            );
+                        }
+                        break;
+                    }
+
+                    match = rest.match(/^(defconfig_list|allnoconfig_y)\s*(#.*)?$/);
+                    if (match) {
+                        break;
+                    }
+
+                    match = rest.match(/^modules\s*(#.*)?$/);
+                    if (match) {
+                        if (entry.name !== 'MODULES') {
+                            this.diags.push(
+                                new vscode.Diagnostic(
+                                    this.lineRange,
+                                    `Modules option is only permitted on the MODULES entry.`,
+                                    vscode.DiagnosticSeverity.Error
+                                )
+                            );
+                        }
+                        break;
+                    }
+
+                    match = rest.match(/^\w+/);
+                    if (match) {
+                        this.diags.push(
+                            new vscode.Diagnostic(
+                                this.lineRange,
+                                `Unexpected option "${match[0]}"`,
+                                vscode.DiagnosticSeverity.Error
+                            )
+                        );
+                    } else {
+                        this.diags.push(
+                            new vscode.Diagnostic(
+                                this.lineRange,
+                                `Expected option.`,
+                                vscode.DiagnosticSeverity.Error
+                            )
+                        );
+                    }
+
+                    break;
+
+                case 'def_bool':
+                case 'def_tristate':
+                case 'def_int':
+                case 'def_hex':
+                case 'def_string':
+                case 'default': {
+                    if (!entry) {
+                        this.diags.push(
+                            new vscode.Diagnostic(
+                                this.lineRange,
+                                `Unexpected ${firstWord} outside config entry`,
+                                vscode.DiagnosticSeverity.Error
+                            )
+                        );
+                        break;
+                    }
+
+                    const expr = this.getExprIf(rest);
+                    if (expr instanceof vscode.Diagnostic) {
+                        this.diags.push(expr);
+                        break;
+                    }
+
+                    entry.defaults.push({ value: expr[0], condition: expr[1] });
+
+                    // Assign type:
+                    if (firstWord !== 'default') {
+                        entry.type = firstWord.substring('def_'.length) as ConfigValueType;
+                    }
+                    entry.extend(lineNumber);
+                    break;
+                }
+
+                case 'help':
+                    if (!entry) {
+                        this.diags.push(
+                            new vscode.Diagnostic(
+                                this.lineRange,
+                                `Unexpected ${firstWord} outside config entry`,
+                                vscode.DiagnosticSeverity.Error
+                            )
+                        );
+                        break;
+                    }
+
+                    help = true;
+                    helpIndent = null;
+                    entry.help = rest.match(/^(.*?)#?/)?.[1];
+                    entry.extend(lineNumber);
+                    break;
+
+                case 'range': {
+                    match = rest.match(/^([+-]?\w+|\$\(.+\))\s+([+-]?\w+|\$\(.+\))(?:\s+(if.*))?/);
+                    if (!match) {
+                        this.diags.push(
+                            new vscode.Diagnostic(
+                                this.lineRange,
+                                'Expected range',
+                                vscode.DiagnosticSeverity.Error
+                            )
+                        );
+                        break;
+                    }
+
+                    if (!entry) {
+                        this.diags.push(
+                            new vscode.Diagnostic(
+                                this.lineRange,
+                                `Unexpected ${firstWord} outside config entry`,
+                                vscode.DiagnosticSeverity.Error
+                            )
+                        );
+                        break;
+                    }
+
+                    const condition = this.getIf(match[3] ?? '');
+                    if (condition instanceof vscode.Diagnostic) {
+                        this.diags.push(condition);
+                        break;
+                    }
+
+                    entry.ranges.push({ min: match[1], max: match[2], condition });
+                    entry.extend(lineNumber);
+                    break;
+                }
+
+                case 'depends':
+                    match = rest.match(/^on\s+(.*)/);
+                    if (match) {
+                        const scope = getScope();
+                        if (
+                            !entry &&
+                            !(scope instanceof MenuScope) &&
+                            !(scope.children[scope.children.length - 1] instanceof Comment)
+                        ) {
+                            this.diags.push(
+                                new vscode.Diagnostic(
+                                    this.lineRange,
+                                    'Unexpected "depends on" outside config entry',
+                                    vscode.DiagnosticSeverity.Error
+                                )
+                            );
+                            break;
+                        }
+
+                        const expr = this.getExprIf(match[1]);
+                        if (expr instanceof vscode.Diagnostic) {
+                            this.diags.push(expr);
+                            break;
+                        }
+
+                        if (entry) {
+                            entry.dependencies.push({ expr: expr[0], condition: expr[1] });
+                            entry.extend(lineNumber);
+                        }
+                    } else {
+                        this.diags.push(
+                            new vscode.Diagnostic(
+                                this.lineRange,
+                                'Expected expression',
+                                vscode.DiagnosticSeverity.Error
+                            )
+                        );
+                    }
+                    break;
+
+                /**
+                 * Scope specific properties:
+                 */
+
+                case 'visible': {
+                    const condition = this.getIf(rest);
+                    if (!condition) {
+                        this.diags.push(
+                            new vscode.Diagnostic(
+                                this.lineRange,
+                                'Expected if-expression',
+                                vscode.DiagnosticSeverity.Error
+                            )
+                        );
+                        break;
+                    }
+                    if (condition instanceof vscode.Diagnostic) {
+                        this.diags.push(condition);
+                        break;
+                    }
+                    const scope = getScope();
+                    if (!(scope instanceof MenuScope)) {
+                        this.diags.push(
+                            new vscode.Diagnostic(
+                                this.lineRange,
+                                '"visible if" is only valid in menu scopes',
+                                vscode.DiagnosticSeverity.Error
+                            )
+                        );
+                        break;
+                    }
+
+                    scope.visible = condition;
+                    break;
+                }
+
+                case 'optional': {
+                    const scope = getScope();
+                    if (!(scope instanceof ChoiceScope)) {
+                        this.diags.push(
+                            new vscode.Diagnostic(
+                                this.lineRange,
+                                '"optional" is only valid in choice entries',
+                                vscode.DiagnosticSeverity.Error
+                            )
+                        );
+                        break;
+                    }
+
+                    scope.choice.optional = true;
+                    break;
+                }
+
+                /**
+                 * Scope termination:
+                 */
+                case 'endif':
+                case 'endmenu':
+                case 'endchoice': {
+                    entry = null;
+                    const scope = getScope();
+                    const expectedScopes = {
+                        endif: IfScope,
+                        endmenu: MenuScope,
+                        endchoice: ChoiceScope,
+                    };
+                    if (!(scope instanceof expectedScopes[firstWord])) {
+                        const diag = new vscode.Diagnostic(
+                            this.lineRange,
+                            `Unexpected ${firstWord}`,
+                            vscode.DiagnosticSeverity.Error
+                        );
+                        if (scope) {
+                            diag.relatedInformation = [
+                                new vscode.DiagnosticRelatedInformation(
+                                    new vscode.Location(this.uri, scope.range),
+                                    'Opening scope'
+                                ),
+                            ];
+                        }
+                        this.diags.push(diag);
+                        break;
+                    }
+                    scope.lines.end = lineNumber;
+                    scopes.pop();
+                    break;
+                }
+
+                default:
+                    // macro
+                    match = this.line.match(/^\s*[\w-]+\s*:?=.*/);
+                    if (match) {
+                        break;
+                    }
+
                     this.diags.push(
                         new vscode.Diagnostic(
-                            lineRange,
-                            `Unexpected depends on`,
+                            this.lineRange,
+                            `Invalid token`,
                             vscode.DiagnosticSeverity.Error
                         )
                     );
-                    unterminatedScope(scope);
-                }
-                continue;
             }
+        }
 
-            match = line.match(envMatch);
-            if (match) {
-                env[match[1]] = match[2];
-                continue;
-            }
+        if (scopes.length > 1) {
+            scopes.forEach((scope) => (scope.lines.end = lines.length));
 
-            match = line.match(visibleMatch);
-            if (match) {
-                if (scope instanceof MenuScope && !entry) {
-                    scope.visible = createExpression(match[1]);
-                } else {
-                    this.diags.push(
-                        new vscode.Diagnostic(
-                            lineRange,
-                            `Only valid for menus`,
-                            vscode.DiagnosticSeverity.Error
-                        )
-                    );
-                }
-                continue;
-            }
-            match = line.match(/^\s*comment\s+"(.*)"/);
-            if (match) {
-                comment = new Comment(match[1], this, lineNumber);
-                if (scope) {
-                    scope.children.push(comment);
-                }
-                continue;
-            }
-
-            var noEntryDiag = new vscode.Diagnostic(
-                lineRange,
-                `Token is only valid in an entry context`,
-                vscode.DiagnosticSeverity.Warning
-            );
-
-            match = line.match(typeMatch);
-            if (match) {
-                if (!entry) {
-                    this.diags.push(noEntryDiag);
-                    continue;
-                }
-                entry.type = match[1] as ConfigValueType;
-                entry.text = match[2];
-                if (match[2]) {
-                    entry.prompt = true;
-                }
-                entry.extend(lineNumber);
-                continue;
-            }
-            match = line.match(selectMatch);
-            if (match) {
-                if (!entry) {
-                    this.diags.push(noEntryDiag);
-                    continue;
-                }
-                entry.selects.push({ name: match[1], condition: createExpression(match[2]) });
-                entry.extend(lineNumber);
-                continue;
-            }
-            match = line.match(promptMatch);
-            if (match) {
-                if (!entry) {
-                    this.diags.push(noEntryDiag);
-                    continue;
-                }
-                entry.text = match[1];
-                entry.prompt = true;
-                entry.extend(lineNumber);
-                continue;
-            }
-            match = line.match(helpMatch);
-            if (match) {
-                if (!entry) {
-                    this.diags.push(noEntryDiag);
-                    continue;
-                }
-                help = true;
-                helpIndent = null;
-                entry.help = '';
-                entry.extend(lineNumber);
-                continue;
-            }
-
-            var ifStatement;
-            match = line.match(defaultMatch);
-            if (match) {
-                if (!entry) {
-                    this.diags.push(noEntryDiag);
-                    continue;
-                }
-                ifStatement = match[1].match(/(.*)if\s+([^#]+)/);
-                if (ifStatement) {
-                    entry.defaults.push({
-                        value: ifStatement[1],
-                        condition: createExpression(ifStatement[2]),
-                    });
-                } else {
-                    entry.defaults.push({ value: match[1] });
-                }
-                entry.extend(lineNumber);
-                continue;
-            }
-            match = line.match(defMatch);
-            if (match) {
-                if (!entry) {
-                    this.diags.push(noEntryDiag);
-                    continue;
-                }
-                entry.type = match[1] as ConfigValueType;
-                ifStatement = match[2].match(/(.*)if\s+([^#]+)/);
-                if (ifStatement) {
-                    entry.defaults.push({
-                        value: ifStatement[1],
-                        condition: createExpression(ifStatement[2]),
-                    });
-                } else {
-                    entry.defaults.push({ value: match[2] });
-                }
-                entry.extend(lineNumber);
-                continue;
-            }
-            match = line.match(defStringMatch);
-            if (match) {
-                if (!entry) {
-                    this.diags.push(noEntryDiag);
-                    continue;
-                }
-                entry.type = 'string';
-                ifStatement = match[1].match(/(.*)if\s+([^#]+)/);
-                if (ifStatement) {
-                    entry.defaults.push({
-                        value: ifStatement[1],
-                        condition: createExpression(ifStatement[2]),
-                    });
-                } else {
-                    entry.defaults.push({ value: match[1] });
-                }
-                entry.extend(lineNumber);
-                continue;
-            }
-            match = line.match(rangeMatch);
-            if (match) {
-                if (!entry) {
-                    this.diags.push(noEntryDiag);
-                    continue;
-                }
-                entry.ranges.push({
-                    min: match[1],
-                    max: match[2],
-                    condition: createExpression(match[3]),
-                });
-                entry.extend(lineNumber);
-                continue;
-            }
-
-            if (line.match(/^\s*optional\b/)) {
-                if (entry instanceof ChoiceEntry) {
-                    entry.optional = true;
-                } else {
-                    this.diags.push(
-                        new vscode.Diagnostic(
-                            lineRange,
-                            `Unexpected keyword, optional is only valid for choices.`,
-                            vscode.DiagnosticSeverity.Error
-                        )
-                    );
-                }
-                continue;
-            }
-
-            if (line.match(/^\s*\w+\s*:\=.*/)) {
-                this.diags.push(
-                    new vscode.Diagnostic(
-                        lineRange,
-                        `Macros aren't supported, this will be ignored.`,
-                        vscode.DiagnosticSeverity.Warning
-                    )
-                );
-                continue;
-            }
-
+            const s = scopes.pop()!;
             this.diags.push(
-                new vscode.Diagnostic(lineRange, `Invalid token`, vscode.DiagnosticSeverity.Error)
+                new vscode.Diagnostic(
+                    new vscode.Range(s.lines.start, 0, s.lines.start, 9999),
+                    `Unterminated ${s.type}. Expected matching end${s.type} before end of parent scope.`,
+                    vscode.DiagnosticSeverity.Error
+                )
             );
         }
+
+        this.parsed = true;
     }
 }

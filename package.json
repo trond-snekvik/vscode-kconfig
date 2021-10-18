@@ -36,8 +36,7 @@
 	],
 	"activationEvents": [
 		"onLanguage:kconfig",
-		"onLanguage:properties",
-		"workspaceContains:Kconfig"
+		"onLanguage:properties"
 	],
 	"main": "./dist/extension.js",
 	"contributes": {
@@ -68,44 +67,17 @@
 						"description": "Disable Kconfig language features",
 						"default": false
 					},
-					"kconfig.zephyr.board": {
-						"type": "object",
-						"description": "Zephyr board to compile for",
-						"properties": {
-							"board": {
-								"type": "string"
-							},
-							"arch": {
-								"type": "string"
-							},
-							"dir": {
-								"type": "string"
-							}
-						}
-					},
-					"kconfig.zephyr.west": {
-						"type": "string",
-						"description": "Location of the West tool"
-					},
 					"kconfig.zephyr.base": {
 						"type": "string",
 						"description": "Override location of Zephyr"
-					},
-					"kconfig.zephyr.soc_roots": {
-						"type": "array",
-						"description": "Additional out-of-tree SoC root directories, as passed to CMake through -DSOC_ROOT",
-						"items": {
-							"type": "string"
-						}
 					}
 				}
 			}
 		],
 		"commands": [
 			{
-				"command": "kconfig.zephyr.setBoard",
-				"title": "Kconfig: Set board for Zephyr",
-				"enablement": "workspaceFolderCount > 0"
+				"command": "kconfig.add",
+				"title": "Kconfig: Add build folder"
 			}
 		],
 		"languages": [
@@ -142,7 +114,7 @@
 		"watch": "tsc -watch -p ./",
 		"test": "npm run compile && node ./node_modules/vscode/bin/test",
 		"webpack": "webpack --mode development",
-		"webpack-dev": "npx webpack --mode development --watch",
+		"dev": "npx webpack --mode development --watch",
 		"test-compile": "tsc -p ./",
 		"lint": "node ./scripts/lint.js",
 		"lintfix": "node ./scripts/lint.js --fix",
@@ -155,11 +127,15 @@
 		"@types/node": "^10.12.21",
 		"@types/vscode": "^1.37.0",
 		"@types/yaml": "^1.2.0",
+		"@getify/eslint-plugin-proper-arrows": "^10.0.0",
+		"@typescript-eslint/eslint-plugin": "^4.26.1",
+		"@typescript-eslint/parser": "^4.26.1",
+		"eslint": "^7.32.0",
+		"eslint-config-prettier": "^7.2.0",
 		"globby": "^11.0.2",
 		"prettier": "^2.3.2",
 		"ts-loader": "^9.2.4",
 		"ts-node": "^10.2.1",
-		"tslint": "^5.12.1",
 		"typescript": "^4.3.5",
 		"webpack": "^5.47.1",
 		"webpack-cli": "^4.7.2"
@@ -167,6 +143,7 @@
 	"dependencies": {
 		"fuzzysort": "^1.1.4",
 		"yaml": "^1.7.2",
-		"glob": "7.1.6"
+		"glob": "7.1.6",
+		"vscode-languageclient": "^7.0.0"
 	}
 }

@@ -6,38 +6,71 @@ pool:
 
 name: $(Year:yyyy).$(Month).$(Rev:r)
 
-steps:
-- task: NodeTool@0
-  inputs:
-    versionSpec: 14
-  displayName: Install Node.js
+jobs:
+  - job: Python
+    steps:
+      - task: UsePythonVersion@0
+        inputs:
+          versionSpec: '3.6'
+        displayName: Set Python version
 
-- script: |
-    set -o errexit -o pipefail
-    npm ci
-  displayName: Install dependencies
+      - script: python -m pip install -r srv/requirements-dev.txt
+        displayName: Install Python requirements
 
-- script: |
-    set -o errexit -o pipefail
-    npm run lint
-  displayName: Run linter
+      - script: python -m mypy --junit-xml out/test-mypy.xml --config-file srv/.mypy.ini
+        displayName: Run mypy
 
-- script: |
-    set -o errexit -o pipefail
-    npm run copyright check
-  displayName: Check copyright statements
+      - script: pytest srv --junitxml=out/test-pytest.xml --cov=srv --cov-report=xml --cov-config=srv/.coveragerc
+        condition: succeededOrFailed()
+        displayName: Run python tests
 
-- bash: |
-    set -o errexit -o pipefail
-    npm install -g vsce
-    npm run updateBuildNumber $(Build.BuildNumber)
-    vsce package
-    pkg=$(ls *.vsix)
-    mv -v ${pkg} "$(Build.ArtifactStagingDirectory)/${pkg}"
-  displayName: Pack and build extension
+      - task: PublishTestResults@2
+        condition: succeededOrFailed()
+        inputs:
+          testResultsFiles: out/test-*.xml
+          testRunTitle: Publish test results for Python
 
-- task: PublishPipelineArtifact@1
-  inputs:
-    targetPath: $(Build.ArtifactStagingDirectory)
-  displayName: Publish artifact
+      - task: PublishCodeCoverageResults@1
+        condition: succeededOrFailed()
+        inputs:
+          codeCoverageTool: Cobertura
+          summaryFileLocation: coverage.xml
+
+
+  - job: NodeJS
+    steps:
+    - task: NodeTool@0
+      inputs:
+        versionSpec: 14
+      displayName: Install Node.js
+
+
+    - script: |
+        set -o errexit -o pipefail
+        npm ci
+      displayName: Install dependencies
+
+    - script: |
+        set -o errexit -o pipefail
+        npm run lint
+      displayName: Run linter
+
+    - script: |
+        set -o errexit -o pipefail
+        npm run copyright check
+      displayName: Check copyright statements
+
+    - bash: |
+        set -o errexit -o pipefail
+        npm install -g vsce
+        npm run updateBuildNumber $(Build.BuildNumber)
+        vsce package
+        pkg=$(ls *.vsix)
+        mv -v ${pkg} "$(Build.ArtifactStagingDirectory)/${pkg}"
+      displayName: Pack and build extension
+
+    - task: PublishPipelineArtifact@1
+      inputs:
+        targetPath: $(Build.ArtifactStagingDirectory)
+      displayName: Publish artifact
 

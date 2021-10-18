@@ -8,137 +8,70 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as zephyr from './zephyr';
 
-var config = vscode.workspace.getConfiguration('kconfig');
+let config = vscode.workspace.getConfiguration('kconfig');
 
-export var extensionContext: vscode.ExtensionContext;
-export function setExtensionContext(ctx: vscode.ExtensionContext) {
-    extensionContext = ctx;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function getConfig<T = any>(name: string): T {
+    return config.get(name) as T;
 }
 
-export function getConfig(name: string): any {
-    return config.get(name);
+let variables: Record<string, string> = {};
+let env: Record<string, string | undefined> = { ...process.env };
+
+export function set(new_env?: Record<string, string | undefined>): void {
+    env = { ...(new_env ?? process.env) };
 }
 
-export async function setConfig(
-    name: string,
-    value: any,
-    target = vscode.ConfigurationTarget.Workspace
-) {
-    await config.update(name, value, target);
+export function get(): Record<string, string | undefined> {
+    return env;
 }
 
-export function getRootFile(): vscode.Uri {
-    var root = getConfig('root');
-    if (!root) {
-        if (zephyr.zephyrRoot) {
-            root = zephyr.zephyrRoot + '/Kconfig';
-        } else {
-            root = '${workspaceFolder}/Kconfig';
+function replace(text: string, map: Record<string, string | undefined>): string {
+    return text.replace(/\$(?:\((.*?)\)|{(.*?)}|(\w+))/g, (original: string, ...vars: string[]) => {
+        const v = vars.find((v) => v !== undefined);
+        if (!v) {
+            return original;
         }
-    }
 
-    return resolvePath(root);
-}
-
-/// Root directory of project
-export function getRoot() {
-    return zephyr.zephyrRoot ?? path.dirname(getRootFile().fsPath);
-}
-
-export function findRootFromApp(appUri: vscode.Uri): string | undefined {
-    const appKconfig = path.join(appUri.fsPath, 'Kconfig');
-
-    if (fs.existsSync(appKconfig)) {
-        return appKconfig;
-    } else if (zephyr.zephyrRoot) {
-        return path.join(zephyr.zephyrRoot, 'Kconfig');
-    }
-}
-
-export function isActive(): boolean {
-    if (getConfig('disable')) {
-        return false;
-    }
-
-    var root = getRootFile();
-    return !!(root && fs.existsSync(root.fsPath));
-}
-
-var env: { [name: string]: string };
-
-export function update() {
-    config = vscode.workspace.getConfiguration('kconfig');
-    env = zephyr.getConfig();
-    Object.assign(env, getConfig('env'));
-
-    try {
-        Object.keys(env).forEach((key) => {
-            var match;
-            while ((match = env[key].match(/\${(.+?)}/)) !== null) {
-                var replacement: string;
-                if (match[1] === key) {
-                    vscode.window.showErrorMessage(
-                        `Kconfig environment is circular: variable ${key} references itself`
-                    );
-                    throw new Error('Kconfig environment is circular');
-                } else if (match[1] in env) {
-                    replacement = env[match[1]];
-                } else if (match[1].startsWith('workspaceFolder')) {
-                    if (!vscode.workspace.workspaceFolders) {
-                        return;
-                    }
-
-                    var folder = match[1].match(/workspaceFolder:(.+)/);
-                    if (folder) {
-                        var wsf = vscode.workspace.workspaceFolders.find(
-                            (f) => f.name === folder![1]
-                        );
-                        if (!wsf) {
-                            return;
-                        }
-                        replacement = wsf.uri.fsPath;
-                    } else {
-                        replacement = vscode.workspace.workspaceFolders[0].uri.fsPath;
-                    }
-                } else {
-                    return;
-                }
-
-                env[key] = env[key].replace(new RegExp(`\\\${${match[1]}}`, 'g'), replacement);
-            }
-        });
-    } catch (e) {
-        // ignore
-    }
-}
-
-export function pathReplace(fileName: string): string {
-    fileName = fileName.replace(
-        '${workspaceFolder}',
-        vscode.workspace.workspaceFolders?.[0].uri.fsPath ?? ''
-    );
-    fileName = fileName.replace(/\${workspaceFolder:(.+?)}/g, (original, name) => {
-        var folder = vscode.workspace.workspaceFolders!.find((folder) => folder.name === name);
-        return folder ? folder.uri.fsPath : original;
-    });
-
-    fileName = fileName.replace(/\$[{(]?(\w+)[})]?/g, (original: string, v: string) => {
-        if (v in env) {
-            return env[v];
+        if (v in map) {
+            return map[v] ?? '';
         }
 
         if (v.startsWith('env:')) {
-            v = v.slice('env:'.length);
+            return env[v.slice('env:'.length)] ?? '';
         }
 
-        if (v in process.env) {
-            return process.env[v] as string;
+        if (v === vars[2]) {
+            return env[v] ?? '';
+        }
+
+        if (v.startsWith('config:')) {
+            const config = vscode.workspace.getConfiguration();
+            return replace(config.get<string>(v.slice('config:'.length)) ?? '', map);
         }
 
         return '';
     });
+}
 
-    return fileName.replace(/$\([^)]+\)/g, '');
+export function update(): void {
+    config = vscode.workspace.getConfiguration('kconfig');
+    variables = zephyr.getConfig();
+    Object.entries(getConfig<Record<string, string>>('env')).forEach(
+        ([key, value]) => (variables[key] = pathReplace(value))
+    );
+}
+
+function pathReplace(fileName: string): string {
+    const map: Record<string, string | undefined> = {
+        workspaceFolder: vscode.workspace.workspaceFolders?.[0].uri.fsPath,
+    };
+
+    vscode.workspace.workspaceFolders?.forEach((folder) => {
+        map[`workspaceFolder:${folder.name}`] = folder.uri.fsPath;
+    });
+
+    return replace(fileName, map);
 }
 
 export function getWorkspaceRoot(file: string): string {
@@ -176,31 +109,3 @@ export function resolvePath(fileName: string, base?: string): vscode.Uri {
     // Relying on the uri accepting files without schemes:
     return vscode.Uri.file(path.resolve(base, fileName));
 }
-
-export type Environment = { [variable: string]: string };
-
-export function replace(text: string, env: Environment) {
-    return text.replace(/\$\((.+?)\)/, (original, variable) =>
-        variable in env ? env[variable] : original
-    );
-}
-
-var filemap: { [scheme: string]: (uri: vscode.Uri) => string } = {};
-
-export function readFile(uri: vscode.Uri): string {
-    if (uri.scheme in filemap) {
-        return filemap[uri.scheme](uri);
-    }
-
-    console.error(`Unknown file ${uri.toString()}`);
-
-    return '';
-}
-
-export function registerFileProvider(scheme: string, cb: (uri: vscode.Uri) => string) {
-    filemap[scheme] = cb;
-}
-
-registerFileProvider('file', (uri: vscode.Uri) =>
-    fs.readFileSync(uri.fsPath, { encoding: 'utf-8' })
-);

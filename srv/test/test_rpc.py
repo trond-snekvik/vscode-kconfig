@@ -3,57 +3,8 @@
 # SPDX-License-Identifier: LicenseRef-Nordic-1-Clause
 
 import json
-import sys
 from rpc import RPCError, RPCServer, handler
-
-
-class StreamEnd(Exception):
-    pass
-
-
-class MockStream:
-    def __init__(self):
-        self.input = ''
-        self.output = ''
-
-    def read(self, n=-1):
-        if len(self.input) < n:
-            raise StreamEnd()
-
-        if n == -1:
-            retval = self.input
-            self.input = ''
-        else:
-            retval = self.input[:n]
-            self.input = self.input[n:]
-        return retval
-
-    def readline(self):
-        try:
-            idx = self.input.index('\n')
-        except ValueError as e:
-            raise StreamEnd()
-        val = self.read(idx + 1)
-        sys.stdout.write(f'Reading line as {idx} bytes: "{val}"\n')
-        return val
-
-    def write(self, buf):
-        self.output += buf
-
-    def push(self, buf):
-        self.input += buf
-
-    def flush(self):
-        pass
-
-    def pull(self, n=-1):
-        if n == -1 or n > len(self.output):
-            retval = self.output
-            self.output = ''
-        else:
-            retval = self.output[:n]
-            self.output = self.output[n:]
-        return retval
+from .mock_stream import MockStream, StreamEnd
 
 
 class Server(RPCServer):

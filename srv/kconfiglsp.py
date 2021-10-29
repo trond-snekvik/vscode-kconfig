@@ -166,7 +166,7 @@ def _children(node):
 
         for choice_node in choice.nodes:
             for child in get_children(choice_node):
-                if not isinstance(child, kconfig.Symbol):
+                if not isinstance(child.item, kconfig.Symbol):
                     children.append(child)
                 elif child.item not in symbols or choice_node is node:
                     children.append(child)
@@ -190,20 +190,6 @@ def _suboption_depth(node):
     return depth
 
 
-def _path(node):
-    """Unique path ID of each node, allowing us to identify each node in a menu"""
-    if node.parent:
-        i = 0
-        it = node.parent.list
-        while it and it != node:
-            it = it.next
-            i += 1
-        if not it:
-            raise RPCError(KconfigErrorCode.DESYNC, 'Tree is invalid')
-        return _path(node.parent) + [i]
-    return [0]
-
-
 def _loc(sym: kconfig.Symbol):
     """Get a list of locations where the given kconfig symbol is defined"""
     return [
@@ -215,6 +201,7 @@ def _loc(sym: kconfig.Symbol):
 def _symbolitem(sym: kconfig.Symbol):
     item = {
         'name': sym.name,
+        'prompt': _prompt(sym, True),
         'visible': sym.visibility > 0,
         'type': kconfig.TYPE_TO_STR[sym.type],
         'help': next((n.help for n in sym.nodes if n.help), '')
@@ -251,7 +238,7 @@ class KconfigMenu:
 
     @property
     def name(self):
-        return str(self.node)
+        return self.node.prompt[0]
 
     def _menuitem(self, node: kconfig.MenuNode):
         sym = node.item
@@ -286,7 +273,10 @@ class KconfigMenu:
                 item['options'] = list(sym.assignable)
             item['kind'] = 'symbol'
         elif isinstance(sym, kconfig.Choice):
+            item['type'] = kconfig.TYPE_TO_STR[sym.type]
             item['val'] = _prompt(sym.selection)
+            item['userValue'] = sym.user_value
+            item['name'] = sym.name
             item['kind'] = 'choice'
         elif sym == kconfig.COMMENT:
             item['kind'] = 'comment'
@@ -523,10 +513,14 @@ class KconfigContext:
         if self._kconfig:
             self._kconfig.valid = False
 
+    @property
+    def all_conf_files(self):
+        """All configuration files going into this build. Includes the board conf file."""
+        return [self.board.conf_file, *self.conf_files]
+
     def has_file(self, uri: Uri):
         """Check whether the given URI represents a conf file this context uses. Does not check board files."""
-        return any([(file.uri == uri)
-                    for file in self.conf_files if file.doc]) or self.board.conf_file.uri == uri
+        return any([(file.uri == uri) for file in self.all_conf_files])
 
     def _node_id(self, node: kconfig.MenuNode):
         """Encode a unique ID string for the given menu node"""
@@ -615,8 +609,7 @@ class KconfigContext:
 
     def conf_file(self, uri):
         """Get the config file with the given URI, if any."""
-        return next((file for file in [self.board.conf_file] + self.conf_files if file.uri == uri),
-                    None)
+        return next((file for file in self.all_conf_files if file.uri == uri), None)
 
     def diags(self, uri):
         """Get the diagnostics for the conf file with the given URI"""
@@ -632,7 +625,7 @@ class KconfigContext:
             list.clear()
 
         self.cmd_diags.clear()
-        for conf in self.conf_files:
+        for conf in self.all_conf_files:
             conf.diags.clear()
 
     def symbols(self, filter):
@@ -649,12 +642,11 @@ class KconfigContext:
 
     def symbol_search(self, query):
         """Search for a symbol with a specific name. Returns a list of symbols as SymbolItems."""
-        return map(_symbolitem, self.symbols(query))
+        return [_symbolitem(sym) for sym in self.symbols(query)]
 
     def all_entries(self) -> List[ConfEntry]:
-        files = [self.board.conf_file] + self.conf_files
         entries = []
-        for file in files:
+        for file in self.all_conf_files:
             entries.extend(file.entries())
         return entries
 
@@ -904,14 +896,15 @@ class KconfigServer(LSPServer):
             self.dbg('Parsing...')
             ctx.parse()
 
-        self.dbg('Load config...')
-        ctx.load_config()
-
         if ctx.valid:
-            self.dbg('Done. {} diags, {} warnings'.format(
-                sum([len(file.diags) for file in ctx.conf_files]), len(ctx._kconfig.warnings if ctx._kconfig else 0)))
+            self.dbg('Load config...')
+            ctx.load_config()
 
-        for conf in ctx.conf_files:
+            self.dbg('Done. {} diags, {} warnings'.format(
+                sum([len(file.diags) for file in ctx.all_conf_files]),
+                len(ctx._kconfig.warnings if ctx._kconfig else 0)))
+
+        for conf in ctx.all_conf_files:
             self.publish_diags(conf.uri, conf.diags)
 
         self.publish_diags(Uri.file('command-line'), ctx.cmd_diags)
@@ -1022,14 +1015,22 @@ class KconfigServer(LSPServer):
             self.dbg('\t' + "\n\t".join([str(f) for f in ctx.conf_files]))
             self.refresh_ctx(ctx)
 
+    def get_ctx(self, id):
+        """Get context from ID, or fall back to other contexts."""
+        if id:
+            return self.ctx.get(id)
+        if self.main_uri:
+            return self.ctx.get(str(self.main_uri))
+        return self.last_ctx
+
     @handler('kconfig/search')
     def handle_search(self, params):
-        ctx = self.ctx[params['ctx']]
+        ctx = self.get_ctx(params.get('ctx'))
         if not ctx:
             return
 
         return {
-            'ctx': params['ctx'],
+            'ctx': str(ctx.uri),
             'query': params['query'],
             'symbols': ctx.symbol_search(params['query']),
         }
@@ -1042,15 +1043,7 @@ class KconfigServer(LSPServer):
 
     @handler('kconfig/getMenu')
     def handle_get_menu(self, params):
-        if 'ctx' in params:
-            ctx = self.ctx[params['ctx']]
-        elif self.main_uri:
-            ctx = self.ctx.get(str(self.main_uri))
-        elif self.last_ctx:
-            ctx = self.last_ctx
-        else:
-            ctx = None
-
+        ctx = self.get_ctx(params.get('ctx'))
         if not ctx:
             return
 
@@ -1063,7 +1056,10 @@ class KconfigServer(LSPServer):
 
     @handler('kconfig/setVal')
     def handle_setval(self, params):
-        ctx = self.ctx[params['ctx']]
+        ctx = self.get_ctx(params.get('ctx'))
+        if not ctx:
+            return
+
         if 'val' in params:
             ctx.set(params['name'], params['val'])
         else:
@@ -1083,6 +1079,8 @@ class KconfigServer(LSPServer):
 
         if not ctx.valid:
             self.refresh_ctx(ctx)
+            if not ctx.valid:
+                return
 
         doc = documentStore.get(uri)
         if not doc:
@@ -1102,7 +1100,8 @@ class KconfigServer(LSPServer):
                 common = os.path.commonprefix([word, 'CONFIG_'])
                 if len(common) < len('CONFIG_'):
                     word = 'CONFIG_' + word[len(common):]
-                show_non_visible = True
+                else:
+                    show_non_visible = True
 
         else:
             word = None

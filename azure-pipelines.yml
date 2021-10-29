@@ -1,17 +1,24 @@
 trigger:
   - master
 
-pool:
-  vmImage: ubuntu-20.04
-
 name: $(Year:yyyy).$(Month).$(Rev:r)
 
 jobs:
   - job: Python
+    pool:
+      vmImage: $(imageName)
+    strategy:
+      matrix:
+        linux:
+          imageName: ubuntu-latest
+        mac:
+          imageName: macOS-latest
+        windows:
+          imageName: windows-latest
     steps:
       - task: UsePythonVersion@0
         inputs:
-          versionSpec: '3.6'
+          versionSpec: '3.8'
         displayName: Set Python version
 
       - script: python -m pip install -r srv/requirements-dev.txt
@@ -38,6 +45,9 @@ jobs:
 
 
   - job: NodeJS
+    pool:
+      vmImage: ubuntu-latest
+
     steps:
     - task: NodeTool@0
       inputs:

@@ -52,6 +52,7 @@ class Uri:
         """
         self.scheme = scheme or ''
         self.authority = authority or ''
+        path = re.sub(r'^/(\w:/)', r'\1', path)
         self.path = path or ''
         self.query = query or ''
         self.fragment = fragment or ''
@@ -61,13 +62,15 @@ class Uri:
             if c in "!#$&'()*+,\\:;=?@[]":
                 return '%{:02X}'.format(ord(c))
             return c
+
         return ''.join([escape_char(c) for c in text])
 
     def __repr__(self):
         path = self.path
         if not path.startswith('/'):
             path = '/' + path
-        uri = '{}://{}{}'.format(*[self.escape(part) for part in [self.scheme, self.authority, path]])
+        uri = '{}://{}{}'.format(
+            *[self.escape(part) for part in [self.scheme, self.authority, path]])
         if self.query:
             uri += '?' + self.query
         if self.fragment:
@@ -621,6 +624,13 @@ class DocumentStore:
     def provider(self, provider):
         """Register a DocumentProvider for a specific URI scheme."""
         self._providers[provider.uri.scheme] = provider
+
+    def reset(self):
+        """
+        Reset the document store to its original state, discarding all changes.
+        """
+        self.docs = {}
+        self._providers = {}
 
     def get(self, uri: Uri, create=True):
         """
@@ -1236,12 +1246,14 @@ class LSPServer(RPCServer):
         self.rootUri = params['rootUri']
         if 'trace' in params:
             self.trace = params['trace']
-        if 'workspaceFolders' in params:
+        if params.get('workspaceFolders'):
             self.dbg('workspaceFolders: ' + str(params['workspaceFolders']))
             self.workspaceFolders = [
                 WorkspaceFolder(Uri.parse(folder['uri']), folder['name'])
                 for folder in params['workspaceFolders']
             ]
+        else:
+            self.workspaceFolders = []
         return {
             'capabilities': self.capabilities(),
             'serverInfo': {

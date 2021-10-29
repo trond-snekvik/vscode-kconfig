@@ -31,7 +31,7 @@ def test_parse_windows_path_escaped():
     uri = lsp.Uri.parse('c:%5CUsers%5CUser%5Cfolder%5Cfilename')
     assert uri.scheme == 'file'
     assert uri.authority == ''
-    assert uri.path == '/c:/Users/User/folder/filename'
+    assert uri.path == 'c:/Users/User/folder/filename'
     assert uri.basename == 'filename'
     assert uri.query == ''
     assert uri.fragment == ''
@@ -41,7 +41,7 @@ def test_parse_windows_path():
     uri = lsp.Uri.parse('c:\\Users\\User\\folder\\filename')
     assert uri.scheme == 'file'
     assert uri.authority == ''
-    assert uri.path == '/c:/Users/User/folder/filename'
+    assert uri.path == 'c:/Users/User/folder/filename'
     assert uri.basename == 'filename'
     assert uri.query == ''
     assert uri.fragment == ''
@@ -51,10 +51,11 @@ def test_parse_windows_file():
     uri = lsp.Uri.parse('file:///c%3A/Users/User/folder/filename')
     assert uri.scheme == 'file'
     assert uri.authority == ''
-    assert uri.path == '/c:/Users/User/folder/filename'
+    assert uri.path == 'c:/Users/User/folder/filename'
     assert uri.basename == 'filename'
     assert uri.query == ''
     assert uri.fragment == ''
+    assert str(uri) == 'file:///c%3A/Users/User/folder/filename'
 
 
 def test_parse_git():

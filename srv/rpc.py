@@ -46,6 +46,17 @@ class RPCMsg:
         """
         self.jsonrpc = jsonrpc
 
+    @staticmethod
+    def from_obj(obj):
+        if 'id' in obj:
+            if 'method' in obj:
+                return RPCRequest(obj['id'], obj['method'], obj.get('params'))
+
+            return RPCResponse(obj['id'], obj.get('result'),
+                               RPCError.create(obj['error']) if obj.get('error') else None)
+
+        return RPCNotification(obj['method'], obj.get('params'))
+
 
 class RPCRequest(RPCMsg):
     def __init__(self, id: Union[str, int], method: str, params: Any = None):
@@ -350,9 +361,7 @@ class RPCServer:
         self._send_stream.write(
             LINE_ENDING.join([
                 'Content-Type: "application/vscode-jsonrpc; charset=utf-8"',
-                'Content-Length: ' + str(len(raw)),
-                '',
-                raw
+                'Content-Length: ' + str(len(raw)), '', raw
             ]))
         self._send_stream.flush()
 
@@ -360,17 +369,12 @@ class RPCServer:
         """Internal: Receive an RPCMessage from the recv_stream"""
         length, _ = self._read_headers()
         data = self._recv_stream.read(length)
+
         self.dbg('recv: {}'.format(data))
+
         obj = json.loads(data)
 
-        if 'id' in obj:
-            if 'method' in obj:
-                self._req = RPCRequest(obj['id'], obj['method'], obj.get('params'))
-                return self._req
-            return RPCResponse(obj['id'], obj.get('result'),
-                               RPCError.create(obj['error']) if 'error' in obj else None)
-
-        return RPCNotification(obj['method'], obj.get('params'))
+        return RPCMsg.from_obj(obj)
 
     def handle(self, msg: Union[RPCNotification, RPCRequest, RPCResponse]):
         """
@@ -387,6 +391,9 @@ class RPCServer:
                 handler(msg)
                 del self.requests[msg.id]
             return
+
+        if isinstance(msg, RPCRequest):
+            self._req = msg
 
         self.dbg('{} Method: {}'.format(type(msg).__name__, msg.method))
 

@@ -1,0 +1,69 @@
+
+mainmenu "Main menu"
+
+config TEST_ENTRY1
+    string "Test entry 1"
+    depends on TEST_ENTRY2
+    default "Entry value"
+
+menu "Some menu"
+config TEST_ENTRY2
+    bool "Test entry 2"
+    help
+      This is a help text
+
+config TEST_ENTRY3
+    bool "Test entry 3"
+
+comment "Some comment"
+
+choice CHOICE
+    bool "A choice"
+
+config OPTION_1
+    bool "Option 1"
+
+config OPTION_2
+    bool "Option 2"
+
+config OPTION_3
+    bool "Option 3"
+
+endchoice
+
+config HIDDEN_ENTRY
+    bool
+    help
+      help text
+endmenu
+
+config ENTRY_$(TEST_VAR)
+    bool
+
+config BOARD_SPECIFIC_ENTRY
+    int "Board configured entry"
+
+menu "Subdir entries"
+mode=plain
+source "dir/Kconfig"
+mode=relative
+rsource "dir/Kconfig"
+mode=optional
+osource "dir/Kconfig"
+mode=relative_optional
+orsource "dir/Kconfig"
+endmenu
+
+osource "does_not_exist"
+
+choice CHOICE
+
+config OPTION_4
+    bool "Option 4"
+
+config OPTION_3 # again
+    bool "Option 3"
+
+comment "A comment inside a choice"
+
+endchoice

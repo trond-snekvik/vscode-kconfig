@@ -18,8 +18,7 @@ let client: LanguageClient;
 const knownContexts: vscode.Uri[] = [];
 
 function startServer(ctx: vscode.ExtensionContext) {
-    const pythonConfig = vscode.workspace.getConfiguration('python');
-    const python = pythonConfig.get<string>('defaultInterpreterPath') ?? 'python';
+    const python = kEnv.getConfig<string>('python');
 
     const serverOptions: ServerOptions = {
         command: python,

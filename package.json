@@ -71,6 +71,12 @@
 				"kconfig.zephyr.base": {
 					"type": "string",
 					"description": "Override location of Zephyr"
+				},
+				"kconfig.python": {
+					"type": "string",
+					"description": "Location of Python executable",
+					"scope": "machine-overridable",
+					"default": "python"
 				}
 			}
 		},

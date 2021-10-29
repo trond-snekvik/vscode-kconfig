@@ -40,40 +40,40 @@
 	],
 	"main": "./dist/extension.js",
 	"contributes": {
-		"configuration": [
-			{
-				"title": "Kconfig",
-				"properties": {
-					"kconfig.root": {
-						"type": "string",
-						"description": "Root kconfig file to start indexing."
-					},
-					"kconfig.env": {
-						"type": "object",
-						"description": "Mapping of environment variables to use in string insertion. Instances of $(VAR) will be replaced by their environment variable VAR's value.",
-						"patternProperties": {
-							".*": {
-								"type": "string"
-							}
+		"configuration": {
+			"title": "Kconfig",
+			"type": "object",
+			"description": "Settings for nRF Kconfig",
+			"properties": {
+				"kconfig.root": {
+					"type": "string",
+					"description": "Root kconfig file to start indexing."
+				},
+				"kconfig.env": {
+					"type": "object",
+					"description": "Mapping of environment variables to use in string insertion. Instances of $(VAR) will be replaced by their environment variable VAR's value.",
+					"patternProperties": {
+						".*": {
+							"type": "string"
 						}
-					},
-					"kconfig.cfiles": {
-						"type": "boolean",
-						"description": "Enable Kconfig hover information and go to definition in C files",
-						"default": true
-					},
-					"kconfig.disable": {
-						"type": "boolean",
-						"description": "Disable Kconfig language features",
-						"default": false
-					},
-					"kconfig.zephyr.base": {
-						"type": "string",
-						"description": "Override location of Zephyr"
 					}
+				},
+				"kconfig.cfiles": {
+					"type": "boolean",
+					"description": "Enable Kconfig hover information and go to definition in C files",
+					"default": true
+				},
+				"kconfig.disable": {
+					"type": "boolean",
+					"description": "Disable Kconfig language features",
+					"default": false
+				},
+				"kconfig.zephyr.base": {
+					"type": "string",
+					"description": "Override location of Zephyr"
 				}
 			}
-		],
+		},
 		"commands": [
 			{
 				"command": "kconfig.add",

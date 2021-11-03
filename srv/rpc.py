@@ -239,10 +239,6 @@ class RPCServer:
             if hasattr(method, '_rsp_method'):
                 self.handlers[method._rsp_method] = method
 
-        # Flush log file:
-        with open(self.log_file, 'a') as f:
-            f.write('=' * 80 + '\n')
-
     def dbg(self, *args):
         """Write a debug message to the log file."""
         if self.logging:
@@ -429,6 +425,11 @@ class RPCServer:
         The loop is only aborted if self.running is set to False,
         or a keyboard interrupt is received.
         """
+        if self.logging:
+            # Put a clear session separator in log file:
+            with open(self.log_file, 'a') as f:
+                f.write('=' * 80 + '\n')
+
         try:
             while self.running:
                 self.handle(self._recv())

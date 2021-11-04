@@ -41,13 +41,12 @@
 	"main": "./dist/extension.js",
 	"contributes": {
 		"configuration": {
-			"title": "Kconfig",
-			"type": "object",
-			"description": "Settings for nRF Kconfig",
+			"title": "nRF Kconfig",
 			"properties": {
 				"kconfig.root": {
 					"type": "string",
-					"description": "Root kconfig file to start indexing."
+					"description": "Root kconfig file to start indexing.",
+					"scope": "machine-overridable"
 				},
 				"kconfig.env": {
 					"type": "object",
@@ -56,7 +55,8 @@
 						".*": {
 							"type": "string"
 						}
-					}
+					},
+					"scope": "machine-overridable"
 				},
 				"kconfig.cfiles": {
 					"type": "boolean",
@@ -70,7 +70,8 @@
 				},
 				"kconfig.zephyr.base": {
 					"type": "string",
-					"description": "Override location of Zephyr"
+					"description": "Override location of Zephyr",
+					"scope": "machine-overridable"
 				},
 				"kconfig.python": {
 					"type": "string",
@@ -83,7 +84,13 @@
 		"commands": [
 			{
 				"command": "kconfig.add",
-				"title": "Kconfig: Add build folder"
+				"title": "Add build folder",
+				"category": "Kconfig"
+			},
+			{
+				"command": "kconfig.adoptChanges",
+				"title": "Adopt changes",
+				"category": "Kconfig"
 			}
 		],
 		"languages": [

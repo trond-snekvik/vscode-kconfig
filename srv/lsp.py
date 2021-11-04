@@ -668,6 +668,22 @@ class DocumentStore:
         return doc
 
 
+class Command:
+    """Command invocation to run on the client"""
+    def __init__(self, title: str, command: str, arguments: Optional[List]):
+        self.title = title
+        self.command = command
+        self.arguments = arguments
+
+
+class CodeLens:
+    """CodeLens instance in a document."""
+    def __init__(self, range: Range, command: Optional[Command], data=None):
+        self.range = range
+        self.command = command
+        self.data = data
+
+
 class CompletionItemKind(enum.IntEnum):
     """Completion item kinds, as defined by the LSP specification."""
     TEXT = 1
@@ -1165,6 +1181,9 @@ class LSPServer(RPCServer):
 
         if has('textDocument/completion'):
             caps['completionProvider'] = {}
+
+        if has('textDocument/codeLens'):
+            caps['codeLensProvider'] = {'resolveProvider': has('codeLens/resolve')}
 
         return caps
 

@@ -402,9 +402,11 @@ class RPCServer:
             except RPCError as e:
                 self.dbg('Failed with error ' + str(e))
                 error = e
+                raise
             except Exception as e:
                 self.dbg('Failed with error ' + str(e))
                 error = RPCError(RPCErrorCode.UNKNOWN_ERROR_CODE, 'Exception: "{}"'.format(e.args))
+                raise
 
             end = datetime.now()
             self.dbg('Handled in {} us'.format((end - start).microseconds))

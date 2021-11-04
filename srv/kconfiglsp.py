@@ -10,10 +10,10 @@ import re
 import enum
 import argparse
 from rpc import handler, RPCError
-from lsp import (CodeAction, CompletionItemKind, Diagnostic, DiagnosticRelatedInfo, DocumentSymbol,
-                 FileChangeKind, InsertTextFormat, LSPServer, MarkupContent, Position, Location,
-                 Snippet, SymbolInformation, SymbolKind, TextEdit, Uri, TextDocument, Range,
-                 documentStore)
+from lsp import (CodeAction, CodeLens, Command, CompletionItemKind, Diagnostic,
+                 DiagnosticRelatedInfo, DocumentSymbol, FileChangeKind, InsertTextFormat, LSPServer,
+                 MarkupContent, Position, Location, Snippet, SymbolInformation, SymbolKind,
+                 TextEdit, Uri, TextDocument, Range, documentStore)
 
 VERSION = '1.0'
 
@@ -226,6 +226,114 @@ def _missing_deps(sym):
     return [dep for dep in deps if kconfig.expr_value(dep) == 0]
 
 
+def _fallback_value(sym: kconfig.Symbol):
+    """
+    Get value assigned to a symbol if it doesn't have a user value.
+
+    Copied from sym.str_val and sym.tri_val, with all user_value parts removed.
+    """
+    # As a quirk of Kconfig, undefined symbols get their name as their
+    # string value. This is why things like "FOO = bar" work for seeing if
+    # FOO has the value "bar".
+    if not sym.orig_type:  # UNKNOWN
+        return sym.name
+
+    if sym.orig_type in kconfig._BOOL_TRISTATE:
+        # Warning: See Symbol._rec_invalidate(), and note that this is a hidden
+        # function call (property magic)
+        vis = sym.visibility
+        val = 0
+
+        if not sym.choice:
+            # Non-choice symbol
+            for default, cond in sym.defaults:
+                dep_val = kconfig.expr_value(cond)
+                if dep_val:
+                    val = min(kconfig.expr_value(default), dep_val)
+                    break
+
+            # Weak reverse dependencies are only considered if our
+            # direct dependencies are met
+            dep_val = kconfig.expr_value(sym.weak_rev_dep)
+            if dep_val and kconfig.expr_value(sym.direct_dep):
+                val = max(dep_val, val)
+
+            # Reverse (select-related) dependencies take precedence
+            dep_val = kconfig.expr_value(sym.rev_dep)
+            if dep_val:
+                val = max(dep_val, val)
+
+            # m is promoted to y for (1) bool symbols and (2) symbols with a
+            # weak_rev_dep (from imply) of y
+            if val == 1 and \
+               (sym.type is kconfig.BOOL or kconfig.expr_value(sym.weak_rev_dep) == 2):
+                val = 2
+
+        elif vis == 2:
+            # Visible choice symbol in y-mode choice. The choice mode limits
+            # the visibility of choice symbols, so it's sufficient to just
+            # check the visibility of the choice symbols themselves.
+            val = 2 if sym.choice.selection is sym else 0
+
+        return kconfig.TRI_TO_STR[val]
+
+    val = ""
+
+    if sym.orig_type in kconfig._INT_HEX:
+        base = kconfig._TYPE_TO_BASE[sym.orig_type]
+
+        # Check if a range is in effect
+        for low_expr, high_expr, cond in sym.ranges:
+            if kconfig.expr_value(cond):
+                has_active_range = True
+
+                # The zeros are from the C implementation running strtoll()
+                # on empty strings
+                low = int(low_expr.str_value, base) if \
+                    kconfig._is_base_n(low_expr.str_value, base) else 0
+                high = int(high_expr.str_value, base) if \
+                    kconfig._is_base_n(high_expr.str_value, base) else 0
+
+                break
+        else:
+            has_active_range = False
+
+        for sym, cond in sym.defaults:
+            if kconfig.expr_value(cond):
+                val = sym.str_value
+
+                if kconfig._is_base_n(val, base):
+                    val_num = int(val, base)
+                else:
+                    val_num = 0  # strtoll() on empty string
+
+                break
+        else:
+            val_num = 0  # strtoll() on empty string
+
+        if has_active_range:
+            clamp = None
+            if val_num < low:
+                clamp = low
+            elif val_num > high:
+                clamp = high
+
+            if clamp is not None:
+                # The value is rewritten to a standard form if it is
+                # clamped
+                val = str(clamp) \
+                        if sym.orig_type is kconfig.INT else \
+                        hex(clamp)
+
+    elif sym.orig_type is kconfig.STRING:
+        for sym, cond in sym.defaults:
+            if kconfig.expr_value(cond):
+                val = sym.str_value
+                break
+
+    return val
+
+
 class KconfigMenu:
     def __init__(self, ctx, node: kconfig.MenuNode, id, show_all):
         """
@@ -341,6 +449,13 @@ class ConfEntry:
         return re.match(r'\d+', self.raw)
 
     @property
+    def str_value(self):
+        """Value in format matching kconfig.Symbol.str_value"""
+        if self.is_string():
+            return self.raw[1:-1]  # strip out quotes
+        return self.raw
+
+    @property
     def value(self):
         """Value assigned in the entry, as seen by kconfig"""
         if self.is_string():
@@ -394,10 +509,14 @@ class ConfFile:
         """The TextDocument this file represents"""
         return documentStore.get(self.uri)
 
+    @property
+    def _lines(self) -> List[str]:
+        return self.doc.lines
+
     def entries(self) -> List[ConfEntry]:
         """The ConfEntries in this file"""
         entries = []
-        for linenr, line in enumerate(self.doc.lines):
+        for linenr, line in enumerate(self._lines):
             match = re.match(r'^\s*(CONFIG_(\w+))\s*\=("[^"]+"|\w+)', line)
             if match:
                 range = Range(Position(linenr, match.start(1)), Position(linenr, match.end(1)))
@@ -413,6 +532,16 @@ class ConfFile:
 
     def __repr__(self):
         return str(self.uri)
+
+
+class VirtualConfFile(ConfFile):
+    def __init__(self, text: str, name: str):
+        self._text = text
+        self.uri = Uri.parse('kconfig:///' + name)
+
+    @property
+    def _lines(self):
+        return self._text.splitlines()
 
 
 class BoardConf:
@@ -499,6 +628,91 @@ class KconfigContext:
                 Diagnostic.err('Kconfig failed: ' + str(e), Range(Position.start(),
                                                                   Position.start())))
         self.version += 1
+
+    def get_min_config(self):
+        if not self.valid:
+            raise Exception('Not valid')
+
+        text = self._kconfig._min_config_contents('')
+        if not text:
+            return
+
+        text = re.sub(r'^# CONFIG_(\w+) is not set', r'CONFIG_\1=n', text, flags=re.M)
+
+        entries = VirtualConfFile(text, str(self)).entries()
+
+        # _min_config_contents will add entries with no default values, as their default
+        # value is implementation specific. Luckily for us, these values are assigned
+        # deterministically in kconfiglib, so we can remove them, as they'll get the
+        # same value anyway.
+        def accept(entry: ConfEntry):
+            sym: kconfig.Symbol = self._kconfig.syms.get(entry.name)
+            if not sym:  # No such entry - most likely a parsing error
+                return False
+            # Unset the user value to get the value of this symbol when the entry isn't
+            # explicitly set to anything. If it's still the same, we can safely leave it
+            # out, as the user value doesn't make any difference anyway.
+            if sym.orig_type in kconfig._INT_HEX:
+                old_val = sym.user_value
+                sym.unset_value()
+                redundant = (entry.str_value == sym.str_value)
+                sym.set_value(old_val)
+                return not redundant
+            return True
+
+        return [entry for entry in entries if accept(entry)]
+
+    def get_changes(self):
+        minimal = self.get_min_config()
+        current = self.all_entries()
+        changes = {
+            'deleted': [],
+            'added': [],
+        }
+
+        for e in minimal:
+            for curr in current:
+                if curr.name == e.name and curr.value == e.value:
+                    break
+            else:
+                changes['added'].append(e)
+
+        for curr in current:
+            for e in minimal:
+                if e.name == curr.name:
+                    break
+            else:
+                changes['deleted'].append(curr)
+
+        return changes
+
+    def get_edits(self, file: ConfFile):
+        if not file.doc:
+            return []
+
+        changes = self.get_changes()
+        entries = file.entries()
+
+        last_line = Position(len(file.doc.lines), 0)
+        if not last_line or (len(entries) and entries[-1].range.end.line < last_line.line):
+            last_line = Position(entries[-1].range.end.line + 1, 0)
+
+        edits = []
+        for change in changes['added']:
+            existing = next((entry for entry in entries if entry.name == change.name), None)
+            if existing:
+                edits.append(TextEdit(existing.value_range, change.raw))
+            else:
+                edits.append(
+                    TextEdit(Range(last_line, last_line), f'CONFIG_{change.name}={change.raw}\n'))
+
+        for change in changes['deleted']:
+            # Only remove entries that appear in this file:
+            existing = next((e for e in entries if e.name == change.name), None)
+            if existing:
+                edits.append(TextEdit(existing.line_range, ''))
+                break
+        return edits
 
     def kconfig_diag(self, uri: Uri, diag: Diagnostic):
         if not str(uri) in self.kconfig_diags:
@@ -813,9 +1027,39 @@ class KconfigContext:
                 if self.check_multiple_assignments(file, entry, all_entries):
                     continue
 
+    def load_config_from_build(self):
+        if not self.valid:
+            pass
+
+        try:
+            self._kconfig.load_config(self.env['KCONFIG_CONFIG'], replace=True)
+
+            self.lint()
+
+            for filename, diags in self._kconfig.diags.items():
+                if filename == '':
+                    self.cmd_diags.extend(diags)
+                else:
+                    uri = Uri.file(filename)
+                    conf = self.conf_file(uri)
+                    if conf:
+                        conf.diags.extend(diags)
+                    else:
+                        self.cmd_diags.extend(diags)
+        except AttributeError as e:
+            self.cmd_diags.append(
+                Diagnostic.err('Kconfig tree parse failed: Invalid attribute ' + str(e),
+                               Range(Position.start(), Position.start())))
+        except Exception as e:
+            self.cmd_diags.append(
+                Diagnostic.err('Kconfig tree parse failed: ' + str(e),
+                               Range(Position.start(), Position.start())))
+
     def load_config(self):
         """Load configuration files and update the diagnostics"""
+        return self.load_config_from_build()
         if not self.valid:
+
             pass
 
         try:
@@ -1252,6 +1496,67 @@ class KconfigServer(LSPServer):
                 actions.extend(diag.actions)
 
         return actions
+
+    @handler('textDocument/codeLens')
+    def handle_code_lens(self, params):
+        uri = Uri.parse(params['textDocument']['uri'])
+        ctx = self.best_ctx(uri)
+        if not ctx:
+            return
+
+        file = ctx.conf_file(uri)
+        if not file or not file.doc:
+            return
+
+        try:
+            changes = ctx.get_changes()
+        except:
+            return
+        entries = file.entries()
+        deletions = 0
+        additions = 0
+        updates = 0
+
+        self.dbg('CHANGES:\n\tADDED:\n\t\t' + '\n\t\t'.join([c.name for c in changes['added']]) +
+                 '\nDELETED:\n\t\t' + '\n\t\t'.join([c.name for c in changes['deleted']]))
+
+        last_line = Position(len(file.doc.lines), 0)
+        if not last_line or (len(entries) and entries[-1].range.end.line < last_line.line):
+            last_line = Position(entries[-1].range.end.line + 1, 0)
+
+        edits = []
+        for change in changes['added']:
+            existing = next((entry for entry in entries if entry.name == change.name), None)
+            if existing:
+                edits.append(TextEdit(existing.value_range, change.raw))
+                updates += 1
+            else:
+                edits.append(
+                    TextEdit(Range(last_line, last_line), f'CONFIG_{change.name}={change.raw}\n'))
+                additions += 1
+
+        for change in changes['deleted']:
+            # Only remove entries that appear in this file:
+            existing = next((e for e in entries if e.name == change.name), None)
+            if existing:
+                edits.append(TextEdit(existing.line_range, ''))
+                deletions += 1
+
+        if len(edits) > 0:
+            build_dir = os.path.relpath(ctx.uri.path, os.path.dirname(file.uri.path))
+            text = f'$(edit) Adopt {len(edits)} changes from ./{build_dir} |'
+
+            if additions:
+                text += ' +' + str(additions)
+            if deletions:
+                text += ' -' + str(deletions)
+            if updates:
+                text += ' ~' + str(updates)
+
+            return [
+                CodeLens(Range(Position.start(), Position.start()),
+                         Command(text, 'kconfig.adoptChanges', [uri, edits]))
+            ]
 
     def on_file_change(self, uri: Uri, kind: FileChangeKind):
         if uri.basename.startswith('Kconfig'):

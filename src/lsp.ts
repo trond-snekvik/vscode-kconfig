@@ -38,12 +38,15 @@ function startServer(ctx: vscode.ExtensionContext) {
             },
             {
                 language: 'c',
+                scheme: 'file',
             },
             {
                 language: 'cpp',
+                scheme: 'file',
             },
             {
                 language: 'kconfig',
+                scheme: 'file',
             },
         ],
 

@@ -23,6 +23,7 @@ export class KconfigLangHandler
     files: ParsedFile[];
     configured = false;
     rescanTimer?: NodeJS.Timeout;
+    nameResolved = new Set<string>();
     constructor() {
         const sortItems = (item: vscode.CompletionItem, i: number) => {
             const pad = '0000';
@@ -87,11 +88,17 @@ export class KconfigLangHandler
          * files at all. Set the kconfig language through a fallback for files
          * that have no other file type set instead:
          */
-        if (!d.languageId || d.languageId === 'plaintext') {
+        if (
+            d.uri.scheme === 'file' &&
+            (!d.languageId || d.languageId === 'plaintext') &&
+            !this.nameResolved.has(d.uri.toString())
+        ) {
             if (path.basename(d.fileName).startsWith('Kconfig.')) {
                 vscode.languages.setTextDocumentLanguage(d, 'kconfig');
+                this.nameResolved.add(d.uri.toString());
             } else if (path.basename(d.fileName).endsWith('_defconfig')) {
                 vscode.languages.setTextDocumentLanguage(d, 'properties');
+                this.nameResolved.add(d.uri.toString());
             }
         }
     }

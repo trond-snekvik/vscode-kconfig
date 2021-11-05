@@ -41,7 +41,7 @@ function replace(text: string, map: Record<string, string | undefined>): string 
             return env[v.slice('env:'.length)] ?? '';
         }
 
-        if (v === vars[2]) {
+        if (v in env) {
             return env[v] ?? '';
         }
 

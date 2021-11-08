@@ -161,10 +161,11 @@ def test_workspace_symbols():
     rsp = request('workspace/symbol', {'query': ''})
     assert rsp.error == None
     assert [r['name'] for r in rsp.result] == [
-        'CONFIG_TEST_ENTRY1', 'CONFIG_TEST_ENTRY2', 'CONFIG_TEST_ENTRY3', 'CONFIG_BT_MESH_DEBUG', 'CONFIG_OPTION_1',
-        'CONFIG_OPTION_2', 'CONFIG_OPTION_3', 'CONFIG_HIDDEN_ENTRY', 'CONFIG_ENTRY_INSERTED',
-        'CONFIG_BOARD_SPECIFIC_ENTRY', 'CONFIG_plain_ENTRY', 'CONFIG_relative_ENTRY',
-        'CONFIG_optional_ENTRY', 'CONFIG_relative_optional_ENTRY', 'CONFIG_OPTION_4'
+        'CONFIG_TEST_ENTRY1', 'CONFIG_TEST_ENTRY2', 'CONFIG_TEST_ENTRY3', 'CONFIG_BT_MESH_DEBUG',
+        'CONFIG_OPTION_1', 'CONFIG_OPTION_2', 'CONFIG_OPTION_3', 'CONFIG_HIDDEN_ENTRY',
+        'CONFIG_ENTRY_INSERTED', 'CONFIG_BOARD_SPECIFIC_ENTRY', 'CONFIG_plain_ENTRY',
+        'CONFIG_relative_ENTRY', 'CONFIG_optional_ENTRY', 'CONFIG_relative_optional_ENTRY',
+        'CONFIG_OPTION_4'
     ]
 
     rsp = request('workspace/symbol', {'query': 'TEST'})
@@ -240,8 +241,7 @@ def test_completion():
 
     # Bool with no suggestions
     rsp = request(
-        'textDocument/completion',
-        {
+        'textDocument/completion', {
             'textDocument': {
                 'uri': str(Uri.file(path.join(zephyr_root, 'prj.conf')))
             },
@@ -623,7 +623,8 @@ def test_change_triggering_reparse():
 
     # Should remove all errors except the CONFIG_BT_MESH_DEBUG issue
     for d in diags:
-        if len(d['diagnostics']) != 0 and d['diagnostics'][0]['message'].startswith('CONFIG_BT_MESH_DEBUG was already disabled.'):
+        if len(d['diagnostics']) != 0 and d['diagnostics'][0]['message'].startswith(
+                'CONFIG_BT_MESH_DEBUG was already disabled.'):
             continue
         assert len(d['diagnostics']) == 0
 

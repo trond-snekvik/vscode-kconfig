@@ -4,7 +4,7 @@
 		{
 			"type": "npm",
 			"script": "dev",
-			"problemMatcher": ["$ts-webpack-watch", "$tslint-webpack-watch"],
+			"problemMatcher": ["$esbuild-watch"],
 			"isBackground": true,
 			"presentation": {
 				"reveal": "never"

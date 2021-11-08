@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta
+            http-equiv="Content-Security-Policy"
+            content="default-src 'none'; img-src #{cspSource} https:; script-src #{cspSource} 'unsafe-inline'; style-src #{cspSource} 'unsafe-inline'; object-src #{cspSource}; frame-src https://www.nordicsemi.com https://developer.nordicsemi.com https://docs.zephyrproject.org; connect-src https:; font-src #{cspSource};"
+        />
+        <link rel="stylesheet" type="text/css" href="#{globalStyleSrc}" />
+        <link rel="stylesheet" type="text/css" href="#{styleSrc}" />
+        <link rel="stylesheet" href="#{codicons}" />
+        <title>#{title}</title>
+    </head>
+    <body>
+        <div id="container"></div>
+        <script type="text/javascript">
+            window.__IMAGE_SRC__ = '#{images}';
+        </script>
+        <script src="#{scriptUri}"></script>
+    </body>
+</html>

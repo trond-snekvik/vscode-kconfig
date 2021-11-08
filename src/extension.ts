@@ -10,7 +10,7 @@ import Api from './api';
 import { KconfigLangHandler } from './langHandler';
 
 export let langHandler: KconfigLangHandler | undefined;
-let context: vscode.ExtensionContext;
+export let context: vscode.ExtensionContext;
 
 export async function startExtension(): Promise<void> {
     await zephyr.activate();
@@ -23,6 +23,9 @@ export async function startExtension(): Promise<void> {
 
 export function activate(ctx: vscode.ExtensionContext): Api {
     context = ctx;
+    console.log('hello everyoen');
+    vscode.window.showInformationMessage("let's have a party!");
+
     if (!vscode.extensions.getExtension('nordic-semiconductor.nrf-connect')) {
         startExtension();
     }

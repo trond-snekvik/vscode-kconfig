@@ -161,7 +161,7 @@ def test_workspace_symbols():
     rsp = request('workspace/symbol', {'query': ''})
     assert rsp.error == None
     assert [r['name'] for r in rsp.result] == [
-        'CONFIG_TEST_ENTRY1', 'CONFIG_TEST_ENTRY2', 'CONFIG_TEST_ENTRY3', 'CONFIG_OPTION_1',
+        'CONFIG_TEST_ENTRY1', 'CONFIG_TEST_ENTRY2', 'CONFIG_TEST_ENTRY3', 'CONFIG_BT_MESH_DEBUG', 'CONFIG_OPTION_1',
         'CONFIG_OPTION_2', 'CONFIG_OPTION_3', 'CONFIG_HIDDEN_ENTRY', 'CONFIG_ENTRY_INSERTED',
         'CONFIG_BOARD_SPECIFIC_ENTRY', 'CONFIG_plain_ENTRY', 'CONFIG_relative_ENTRY',
         'CONFIG_optional_ENTRY', 'CONFIG_relative_optional_ENTRY', 'CONFIG_OPTION_4'
@@ -238,6 +238,19 @@ def test_completion():
     ]
     assert rsp.result['isIncomplete'] == True  # Didn't yield all results
 
+    # Bool with no suggestions
+    rsp = request(
+        'textDocument/completion',
+        {
+            'textDocument': {
+                'uri': str(Uri.file(path.join(zephyr_root, 'prj.conf')))
+            },
+            'position': Position(4, 18).__dict__,
+        })
+
+    assert [i['insertText'] for i in rsp.result['items']] == ['CONFIG_BT_MESH_DEBUG=${1}']
+    assert rsp.result['isIncomplete'] == False
+
 
 def test_doc_symbols():
     test_parse_context()
@@ -274,7 +287,13 @@ def test_doc_symbols():
             'line': 2,
             'kind': SymbolKind.PROPERTY,
             'detail': None  # hidden
-        }
+        },
+        {
+            'name': 'CONFIG_BT_MESH_DEBUG',
+            'line': 4,
+            'kind': SymbolKind.PROPERTY,
+            'detail': 'Enable debug logs'
+        },
     ]
 
 
@@ -602,8 +621,10 @@ def test_change_triggering_reparse():
     diags = [n.params for n in notifications if n.method == 'textDocument/publishDiagnostics']
     assert len(diags) == 3
 
-    # Should remove all errors:
+    # Should remove all errors except the CONFIG_BT_MESH_DEBUG issue
     for d in diags:
+        if len(d['diagnostics']) != 0 and d['diagnostics'][0]['message'].startswith('CONFIG_BT_MESH_DEBUG was already disabled.'):
+            continue
         assert len(d['diagnostics']) == 0
 
 

@@ -15,6 +15,13 @@ config TEST_ENTRY2
 config TEST_ENTRY3
     bool "Test entry 3"
 
+config BT_MESH_DEBUG
+    bool "Enable debug logs"
+    depends on BT_DEBUG && BT_MESH && BT
+    help
+      Use this option to enable debug logs for the Bluetooth
+      Mesh functionality.
+
 comment "Some comment"
 
 choice CHOICE

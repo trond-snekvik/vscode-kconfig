@@ -1113,7 +1113,13 @@ class KconfigServer(LSPServer):
             if sym.type in [kconfig.BOOL, kconfig.TRISTATE]:
                 choices = [kconfig.TRI_TO_STR[val] for val in list(sym.assignable)]
                 choices.reverse()  # sym.assignable shows 'n' first, but user normally wants 'y'
-                insert.add_choice(choices)
+                # It is possible to have no valid assignable options for a symbol. If so then we
+                # still want to provide the auto-completion of the symbol name but can't provide any
+                # suggestions
+                if choices:
+                    insert.add_choice(choices)
+                else:
+                    insert.add_tabstop()
             elif sym.type == kconfig.STRING:
                 insert.add_text('"')
                 insert.add_tabstop()

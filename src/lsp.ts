@@ -17,9 +17,8 @@ import { existsSync, readFile } from 'fs';
 let client: LanguageClient;
 const knownContexts: vscode.Uri[] = [];
 
-function startServer(ctx: vscode.ExtensionContext) {
+async function startServer(ctx: vscode.ExtensionContext) {
     const python = kEnv.getConfig<string>('python');
-
     const serverOptions: ServerOptions = {
         command: python,
         args: [path.resolve(ctx.extensionPath, 'srv', 'kconfiglsp.py')],
@@ -55,15 +54,15 @@ function startServer(ctx: vscode.ExtensionContext) {
 
     client = new LanguageClient('Kconfig', serverOptions, clientOptions);
     ctx.subscriptions.push(client.start());
+
+    await client.onReady();
 }
 
-async function addKconfigContexts() {
+export async function findBuildFolders(): Promise<void> {
     const caches = await vscode.workspace.findFiles(
         '**/CMakeCache.txt',
         '**/{twister,sanity}-out*'
     );
-
-    await client.onReady();
 
     await Promise.all(
         caches.map((cache) =>
@@ -72,15 +71,9 @@ async function addKconfigContexts() {
             })
         )
     );
-
-    const cacheWatcher = vscode.workspace.createFileSystemWatcher('**/CMakeCache.txt');
-
-    cacheWatcher.onDidChange(addBuild);
-    cacheWatcher.onDidCreate(addBuild);
-    cacheWatcher.onDidDelete(removeBuild);
 }
 
-export function activate(ctx: vscode.ExtensionContext): Promise<void> {
+export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     vscode.commands.registerCommand('kconfig.add', () => {
         vscode.window
             .showOpenDialog({
@@ -95,8 +88,7 @@ export function activate(ctx: vscode.ExtensionContext): Promise<void> {
             });
     });
 
-    startServer(ctx);
-    return addKconfigContexts();
+    await startServer(ctx);
 }
 
 export async function setMainBuild(uri?: vscode.Uri): Promise<void> {

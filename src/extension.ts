@@ -21,13 +21,14 @@ export async function startExtension(): Promise<void> {
     await lsp.activate(context);
 }
 
-export function activate(ctx: vscode.ExtensionContext): Api {
+export async function activate(ctx: vscode.ExtensionContext): Promise<Api> {
     context = ctx;
     console.log('hello everyoen');
     vscode.window.showInformationMessage("let's have a party!");
 
     if (!vscode.extensions.getExtension('nordic-semiconductor.nrf-connect')) {
         startExtension();
+        await lsp.findBuildFolders();
     }
 
     return new Api();

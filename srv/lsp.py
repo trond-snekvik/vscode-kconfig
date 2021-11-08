@@ -1080,7 +1080,11 @@ class Snippet:
         """
         if number == NEXT_TABSTOP:
             number = self._next_tabstop
-        self.text += ''.join(['${', str(number), '|', ','.join(choices), '|}'])
+
+        # Don't try to format and insert an empty list
+        choices_text = '|{choices}|'.format(choices=','.join(choices)) if choices else ''
+
+        self.text += '${{{number}{choices_text}}}'.format(number=number, choices_text=choices_text)
         self._next_tabstop = number + 1
 
 
